@@ -48,3 +48,5 @@ local.db-journal
 
 # uploaded receipts (local dev only)
 /public/uploads/
+
+.vercel

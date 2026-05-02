@@ -52,6 +52,11 @@ export default function manifest(): MetadataRoute.Manifest {
         url: "/expenses",
       },
       {
+        name: "المتأخرات",
+        short_name: "متأخرات",
+        url: "/outstandings",
+      },
+      {
         name: "التقارير",
         short_name: "تقارير",
         url: "/reports",
