@@ -10,7 +10,7 @@ import {
   monthlyDues as monthlyDuesTable,
 } from "@/lib/db";
 import { getSession } from "@/lib/auth";
-import { MonthlyReport, type ReportData } from "@/lib/pdf/report";
+import { MonthlyReport, type ReportData, type NeighborStatusRow } from "@/lib/pdf/report";
 import { monthName } from "@/lib/utils";
 
 export const runtime = "nodejs";
@@ -70,13 +70,72 @@ export async function GET(
   const monthDue = monthDueRows[0];
   const monthlyAmount = monthDue?.amount ?? 0;
 
-  const activeNeighbors = allNeighbors.filter((n) => n.active);
-  const neighborById = new Map(allNeighbors.map((n) => [n.id, n]));
-  const paidIds = new Set(monthPayments.map((p) => p.neighborId));
+  // Active neighbors who joined on/before the end of this month, OR have any payment in this month.
+  const monthEnd = new Date(year, month, 0); // last day
+  const paymentsByNeighbor = new Map<number, typeof monthPayments>();
+  for (const p of monthPayments) {
+    const arr = paymentsByNeighbor.get(p.neighborId) ?? [];
+    arr.push(p);
+    paymentsByNeighbor.set(p.neighborId, arr);
+  }
 
-  const totalExpected = monthlyAmount * activeNeighbors.length;
-  const totalCollected = monthPayments.reduce((s, p) => s + p.amount, 0);
+  const eligible = allNeighbors.filter((n) => {
+    const created = new Date(n.createdAt);
+    if (created > monthEnd) return false;
+    if (n.active) return true;
+    return paymentsByNeighbor.has(n.id);
+  });
+
+  const neighborsStatus: NeighborStatusRow[] = eligible.map((n) => {
+    const ps = paymentsByNeighbor.get(n.id) ?? [];
+    const paid = ps.reduce((s, p) => s + p.amount, 0);
+    const balance = paid - monthlyAmount;
+    const last = ps.length > 0
+      ? [...ps].sort((a, b) => b.paidAt.localeCompare(a.paidAt))[0]
+      : null;
+    const notes = ps
+      .map((p) => p.notes)
+      .filter(Boolean)
+      .join(" • ");
+    return {
+      name: n.name,
+      apartmentNumber: n.apartmentNumber,
+      due: monthlyAmount,
+      paid,
+      balance,
+      paymentsCount: ps.length,
+      paymentMethod:
+        ps.length === 0
+          ? null
+          : ps.length === 1
+            ? ps[0].paymentMethod
+            : `${ps.length} دفعات`,
+      paidAt: last?.paidAt ?? null,
+      notes: notes || null,
+    };
+  });
+
+  // Sort: unpaid first, then by status, then by name
+  neighborsStatus.sort((a, b) => {
+    const aOrder = a.paid === 0 ? 0 : a.balance < 0 ? 1 : a.balance > 0 ? 3 : 2;
+    const bOrder = b.paid === 0 ? 0 : b.balance < 0 ? 1 : b.balance > 0 ? 3 : 2;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.name.localeCompare(b.name, "ar");
+  });
+
+  const totalExpected = monthlyAmount * eligible.length;
+  const totalCollected = neighborsStatus.reduce((s, n) => s + n.paid, 0);
+  const totalRemaining = neighborsStatus.reduce(
+    (s, n) => s + (n.balance < 0 ? -n.balance : 0),
+    0
+  );
+  const totalSurplus = neighborsStatus.reduce(
+    (s, n) => s + (n.balance > 0 ? n.balance : 0),
+    0
+  );
   const totalExpenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
+  const paidCount = neighborsStatus.filter((n) => n.paid > 0).length;
+  const unpaidCount = neighborsStatus.filter((n) => n.paid === 0).length;
 
   const data: ReportData = {
     buildingName,
@@ -87,26 +146,14 @@ export async function GET(
     monthlyAmountSet: !!monthDue,
     totalExpected,
     totalCollected,
+    totalRemaining,
+    totalSurplus,
     totalExpenses,
     net: totalCollected - totalExpenses,
-    activeNeighborsCount: activeNeighbors.length,
-    paid: monthPayments.map((p) => {
-      const n = neighborById.get(p.neighborId);
-      return {
-        name: n?.name ?? "محذوف",
-        apartmentNumber: n?.apartmentNumber ?? null,
-        amount: p.amount,
-        paymentMethod: p.paymentMethod,
-        paidAt: p.paidAt,
-        notes: p.notes,
-      };
-    }),
-    unpaid: activeNeighbors
-      .filter((n) => !paidIds.has(n.id))
-      .map((n) => ({
-        name: n.name,
-        apartmentNumber: n.apartmentNumber,
-      })),
+    activeNeighborsCount: eligible.length,
+    paidCount,
+    unpaidCount,
+    neighbors: neighborsStatus,
     expenses: monthExpenses.map((e) => ({
       expenseDate: e.expenseDate,
       category: e.category,

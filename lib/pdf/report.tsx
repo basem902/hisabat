@@ -33,7 +33,6 @@ const styles = StyleSheet.create({
     padding: 32,
     color: "#0f172a",
   },
-  // Header
   header: {
     flexDirection: "row-reverse",
     justifyContent: "space-between",
@@ -60,35 +59,33 @@ const styles = StyleSheet.create({
     color: "#64748b",
     textAlign: "left",
   },
-  // Summary cards
   summaryRow: {
     flexDirection: "row-reverse",
-    gap: 8,
-    marginBottom: 16,
+    gap: 6,
+    marginBottom: 14,
+    flexWrap: "wrap",
   },
   summaryCard: {
     flex: 1,
-    padding: 10,
+    minWidth: 90,
+    padding: 8,
     borderRadius: 6,
     borderWidth: 1,
     borderColor: "#e2e8f0",
   },
   summaryLabel: {
-    fontSize: 9,
+    fontSize: 8,
     color: "#64748b",
-    marginBottom: 4,
+    marginBottom: 3,
     textAlign: "right",
   },
   summaryValue: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 700,
     textAlign: "right",
   },
-  // Sections
   sectionHeader: {
     flexDirection: "row-reverse",
-    justifyContent: "space-between",
-    alignItems: "center",
     backgroundColor: "#f1f5f9",
     padding: 8,
     paddingHorizontal: 10,
@@ -102,11 +99,6 @@ const styles = StyleSheet.create({
     color: "#1e293b",
     textAlign: "right",
   },
-  sectionCount: {
-    fontSize: 9,
-    color: "#64748b",
-  },
-  // Tables
   table: {
     borderWidth: 1,
     borderColor: "#e2e8f0",
@@ -161,7 +153,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: "#94a3b8",
   },
-  // Footer
+  badge: {
+    paddingVertical: 1,
+    paddingHorizontal: 5,
+    borderRadius: 3,
+    fontSize: 8,
+    fontWeight: 700,
+  },
   footer: {
     position: "absolute",
     bottom: 20,
@@ -176,18 +174,16 @@ const styles = StyleSheet.create({
   },
 });
 
-export interface PaidNeighborRow {
+export interface NeighborStatusRow {
   name: string;
   apartmentNumber: string | null;
-  amount: number;
-  paymentMethod: string;
-  paidAt: string;
+  due: number;
+  paid: number;
+  balance: number; // paid - due (negative = remaining, positive = surplus)
+  paymentsCount: number;
+  paymentMethod: string | null;
+  paidAt: string | null;
   notes: string | null;
-}
-
-export interface UnpaidNeighborRow {
-  name: string;
-  apartmentNumber: string | null;
 }
 
 export interface ExpenseRow {
@@ -207,11 +203,14 @@ export interface ReportData {
   monthlyAmountSet: boolean;
   totalExpected: number;
   totalCollected: number;
+  totalRemaining: number;
+  totalSurplus: number;
   totalExpenses: number;
   net: number;
   activeNeighborsCount: number;
-  paid: PaidNeighborRow[];
-  unpaid: UnpaidNeighborRow[];
+  paidCount: number;
+  unpaidCount: number;
+  neighbors: NeighborStatusRow[];
   expenses: ExpenseRow[];
   generatedAt: string;
 }
@@ -225,6 +224,19 @@ const fmtDate = (d: string) =>
     month: "2-digit",
     day: "2-digit",
   });
+
+function statusOf(row: NeighborStatusRow): {
+  label: string;
+  bg: string;
+  fg: string;
+} {
+  if (row.paid === 0) return { label: "لم يدفع", bg: "#fee2e2", fg: "#991b1b" };
+  if (row.balance < 0)
+    return { label: "متبقي", bg: "#fef3c7", fg: "#92400e" };
+  if (row.balance > 0)
+    return { label: "فائض", bg: "#dbeafe", fg: "#1e40af" };
+  return { label: "مكتمل", bg: "#d1fae5", fg: "#065f46" };
+}
 
 export function MonthlyReport({ data }: { data: ReportData }) {
   ensureFonts();
@@ -245,10 +257,10 @@ export function MonthlyReport({ data }: { data: ReportData }) {
           </Text>
         </View>
 
-        {/* Summary */}
+        {/* Summary cards (row 1) */}
         <View style={styles.summaryRow}>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>مستحق على كل ساكن</Text>
+            <Text style={styles.summaryLabel}>على كل ساكن</Text>
             <Text style={[styles.summaryValue, { color: "#1d4ed8" }]}>
               {data.monthlyAmountSet
                 ? fmt(data.monthlyAmount, data.currency)
@@ -286,94 +298,180 @@ export function MonthlyReport({ data }: { data: ReportData }) {
           </View>
         </View>
 
-        {/* Paid section */}
+        {/* Summary cards (row 2 - balance focus) */}
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>إجمالي المتبقي</Text>
+            <Text
+              style={[
+                styles.summaryValue,
+                { color: data.totalRemaining > 0 ? "#d97706" : "#64748b" },
+              ]}
+            >
+              {fmt(data.totalRemaining, data.currency)}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>إجمالي الفائض</Text>
+            <Text
+              style={[
+                styles.summaryValue,
+                { color: data.totalSurplus > 0 ? "#1d4ed8" : "#64748b" },
+              ]}
+            >
+              {fmt(data.totalSurplus, data.currency)}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>دفعوا</Text>
+            <Text style={[styles.summaryValue, { color: "#059669" }]}>
+              {data.paidCount} / {data.activeNeighborsCount}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>متأخّرون</Text>
+            <Text
+              style={[
+                styles.summaryValue,
+                { color: data.unpaidCount > 0 ? "#dc2626" : "#059669" },
+              ]}
+            >
+              {data.unpaidCount}
+            </Text>
+          </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>نسبة التحصيل</Text>
+            <Text style={[styles.summaryValue, { color: "#1d4ed8" }]}>
+              {data.totalExpected > 0
+                ? `${Math.round((data.totalCollected / data.totalExpected) * 100)}%`
+                : "—"}
+            </Text>
+          </View>
+        </View>
+
+        {/* Neighbors status table */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>
-            المدفوعات ({data.paid.length} من {data.activeNeighborsCount})
+            حالة الجيران ({data.neighbors.length})
           </Text>
         </View>
         <View style={styles.table}>
           <View style={styles.thead}>
-            <Text style={[styles.th, { width: "30%" }]}>الاسم</Text>
-            <Text style={[styles.th, { width: "12%" }]}>الشقة</Text>
-            <Text style={[styles.th, { width: "18%" }]}>المبلغ</Text>
-            <Text style={[styles.th, { width: "16%" }]}>طريقة الدفع</Text>
+            <Text style={[styles.th, { width: "26%" }]}>الاسم</Text>
+            <Text style={[styles.th, { width: "9%" }]}>الشقة</Text>
+            <Text style={[styles.th, { width: "13%" }]}>المستحق</Text>
+            <Text style={[styles.th, { width: "13%" }]}>المدفوع</Text>
+            <Text style={[styles.th, { width: "14%" }]}>الفرق</Text>
+            <Text style={[styles.th, { width: "11%" }]}>الحالة</Text>
             <Text style={[styles.th, { width: "14%" }]}>تاريخ الدفع</Text>
-            <Text style={[styles.th, { width: "10%" }]}>ملاحظات</Text>
           </View>
-          {data.paid.length === 0 ? (
-            <Text style={styles.empty}>لا يوجد مدفوعات لهذا الشهر</Text>
+          {data.neighbors.length === 0 ? (
+            <Text style={styles.empty}>لا يوجد جيران نشطون</Text>
           ) : (
-            data.paid.map((p, i) => (
-              <View
-                key={i}
-                style={[styles.tr, i % 2 === 1 ? styles.trAlt : {}]}
-              >
-                <Text style={[styles.td, { width: "30%" }]}>{p.name}</Text>
-                <Text style={[styles.td, { width: "12%" }, styles.tdMuted]}>
-                  {p.apartmentNumber ?? "—"}
-                </Text>
-                <Text style={[styles.td, { width: "18%", fontWeight: 700 }]}>
-                  {fmt(p.amount, data.currency)}
-                </Text>
-                <Text style={[styles.td, { width: "16%" }, styles.tdMuted]}>
-                  {p.paymentMethod}
-                </Text>
-                <Text style={[styles.td, { width: "14%" }, styles.tdMuted]}>
-                  {fmtDate(p.paidAt)}
-                </Text>
-                <Text style={[styles.td, { width: "10%" }, styles.tdMuted]}>
-                  {p.notes ?? "—"}
-                </Text>
-              </View>
-            ))
+            data.neighbors.map((n, i) => {
+              const status = statusOf(n);
+              const balanceColor =
+                n.balance < 0
+                  ? "#d97706"
+                  : n.balance > 0
+                    ? "#1d4ed8"
+                    : "#64748b";
+              const balanceText =
+                n.balance === 0
+                  ? "—"
+                  : n.balance < 0
+                    ? `-${fmt(Math.abs(n.balance), data.currency)}`
+                    : `+${fmt(n.balance, data.currency)}`;
+              return (
+                <View
+                  key={i}
+                  style={[styles.tr, i % 2 === 1 ? styles.trAlt : {}]}
+                >
+                  <Text style={[styles.td, { width: "26%" }]}>{n.name}</Text>
+                  <Text
+                    style={[styles.td, { width: "9%" }, styles.tdMuted]}
+                  >
+                    {n.apartmentNumber ?? "—"}
+                  </Text>
+                  <Text style={[styles.td, { width: "13%" }]}>
+                    {data.monthlyAmountSet
+                      ? fmt(n.due, data.currency)
+                      : "—"}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.td,
+                      {
+                        width: "13%",
+                        fontWeight: 700,
+                        color: n.paid > 0 ? "#059669" : "#94a3b8",
+                      },
+                    ]}
+                  >
+                    {fmt(n.paid, data.currency)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.td,
+                      {
+                        width: "14%",
+                        fontWeight: 700,
+                        color: balanceColor,
+                      },
+                    ]}
+                  >
+                    {balanceText}
+                  </Text>
+                  <View
+                    style={[
+                      styles.td,
+                      { width: "11%", paddingVertical: 4 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.badge,
+                        { backgroundColor: status.bg, color: status.fg },
+                      ]}
+                    >
+                      {status.label}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[styles.td, { width: "14%" }, styles.tdMuted]}
+                  >
+                    {n.paidAt ? fmtDate(n.paidAt) : "—"}
+                  </Text>
+                </View>
+              );
+            })
           )}
-          {data.paid.length > 0 && (
+          {data.neighbors.length > 0 && (
             <View style={styles.tfoot}>
-              <Text style={[styles.tfCell, { width: "42%" }]}>الإجمالي</Text>
+              <Text style={[styles.tfCell, { width: "35%" }]}>الإجمالي</Text>
+              <Text style={[styles.tfCell, { width: "13%" }]}>
+                {fmt(data.totalExpected, data.currency)}
+              </Text>
               <Text
-                style={[styles.tfCell, { width: "18%", color: "#059669" }]}
+                style={[styles.tfCell, { width: "13%", color: "#059669" }]}
               >
                 {fmt(data.totalCollected, data.currency)}
               </Text>
-              <Text style={[styles.tfCell, { width: "40%" }]}> </Text>
-            </View>
-          )}
-        </View>
-
-        {/* Unpaid section */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            المتأخرون ({data.unpaid.length})
-          </Text>
-        </View>
-        <View style={styles.table}>
-          <View style={styles.thead}>
-            <Text style={[styles.th, { width: "60%" }]}>الاسم</Text>
-            <Text style={[styles.th, { width: "20%" }]}>الشقة</Text>
-            <Text style={[styles.th, { width: "20%" }]}>المبلغ المستحق</Text>
-          </View>
-          {data.unpaid.length === 0 ? (
-            <Text style={styles.empty}>الجميع دفعوا — أحسنت!</Text>
-          ) : (
-            data.unpaid.map((u, i) => (
-              <View
-                key={i}
-                style={[styles.tr, i % 2 === 1 ? styles.trAlt : {}]}
+              <Text
+                style={[
+                  styles.tfCell,
+                  { width: "14%", color: "#d97706" },
+                ]}
               >
-                <Text style={[styles.td, { width: "60%" }]}>{u.name}</Text>
-                <Text style={[styles.td, { width: "20%" }, styles.tdMuted]}>
-                  {u.apartmentNumber ?? "—"}
-                </Text>
-                <Text
-                  style={[styles.td, { width: "20%", color: "#d97706" }]}
-                >
-                  {data.monthlyAmountSet
-                    ? fmt(data.monthlyAmount, data.currency)
-                    : "—"}
-                </Text>
-              </View>
-            ))
+                {data.totalSurplus > 0
+                  ? `+${fmt(data.totalSurplus, data.currency)} / `
+                  : ""}
+                {data.totalRemaining > 0
+                  ? `-${fmt(data.totalRemaining, data.currency)}`
+                  : "—"}
+              </Text>
+              <Text style={[styles.tfCell, { width: "25%" }]}> </Text>
+            </View>
           )}
         </View>
 
@@ -407,7 +505,10 @@ export function MonthlyReport({ data }: { data: ReportData }) {
                   {e.description}
                 </Text>
                 <Text
-                  style={[styles.td, { width: "16%", fontWeight: 700, color: "#dc2626" }]}
+                  style={[
+                    styles.td,
+                    { width: "16%", fontWeight: 700, color: "#dc2626" },
+                  ]}
                 >
                   {fmt(e.amount, data.currency)}
                 </Text>
