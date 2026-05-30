@@ -46,7 +46,14 @@ export async function POST(req: Request) {
     const file = fd.get("receipt") as File | null;
     let receiptUrl: string | null = null;
     if (file && typeof file === "object" && file.size > 0) {
-      receiptUrl = await uploadFile(file, "expenses");
+      try {
+        receiptUrl = await uploadFile(file, "expenses");
+      } catch (e) {
+        return NextResponse.json(
+          { error: e instanceof Error ? e.message : "تعذّر رفع الملف" },
+          { status: 400 }
+        );
+      }
     }
     body = {
       year: Number(fd.get("year")),

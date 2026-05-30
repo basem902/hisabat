@@ -2,7 +2,8 @@
 
 import {
   Bar,
-  BarChart,
+  ComposedChart,
+  Line,
   CartesianGrid,
   Legend,
   ResponsiveContainer,
@@ -16,7 +17,12 @@ export function DashboardChart({
   data,
   currency,
 }: {
-  data: { label: string; income: number; expense: number }[];
+  data: {
+    label: string;
+    income: number;
+    expense: number;
+    balance: number;
+  }[];
   currency: string;
 }) {
   const { resolvedTheme } = useTheme();
@@ -31,7 +37,10 @@ export function DashboardChart({
   return (
     <div className="h-64 w-full" dir="ltr">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 6, right: 8, bottom: 4, left: 8 }}>
+        <ComposedChart
+          data={data}
+          margin={{ top: 6, right: 8, bottom: 4, left: 8 }}
+        >
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={grid} />
           <XAxis
             dataKey="label"
@@ -75,7 +84,15 @@ export function DashboardChart({
             fill="#ef4444"
             radius={[6, 6, 0, 0]}
           />
-        </BarChart>
+          <Line
+            type="monotone"
+            dataKey="balance"
+            name="رصيد الصندوق"
+            stroke="#2563eb"
+            strokeWidth={2}
+            dot={{ r: 3, fill: "#2563eb" }}
+          />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );

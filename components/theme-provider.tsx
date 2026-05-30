@@ -39,6 +39,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       saved === "light" || saved === "dark" || saved === "system"
         ? saved
         : "system";
+    // Theme must hydrate from localStorage after mount (no SSR access),
+    // so this synchronous setState on mount is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThemeState(initial);
     setResolvedTheme(applyTheme(initial));
   }, []);

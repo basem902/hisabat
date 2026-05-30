@@ -21,10 +21,19 @@ export async function uploadFile(
     return blob.url;
   }
 
-  await mkdir(path.join(UPLOAD_DIR, prefix), { recursive: true });
-  const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(path.join(UPLOAD_DIR, filename), buffer);
-  return `/uploads/${filename}`;
+  try {
+    await mkdir(path.join(UPLOAD_DIR, prefix), { recursive: true });
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await writeFile(path.join(UPLOAD_DIR, filename), buffer);
+    return `/uploads/${filename}`;
+  } catch {
+    // On serverless hosts (e.g. Vercel) the filesystem is read-only, so the
+    // local fallback fails. Surface a clear, actionable message instead of a
+    // generic 500 — uploads need a Blob token in production.
+    throw new Error(
+      "رفع الملفات غير مفعّل على هذا الخادم. أضف BLOB_READ_WRITE_TOKEN في متغيّرات البيئة (Vercel → Storage → Blob) لتفعيل رفع الإيصالات."
+    );
+  }
 }
 
 export async function deleteFile(url: string): Promise<void> {
