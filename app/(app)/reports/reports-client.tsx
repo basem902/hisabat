@@ -45,6 +45,8 @@ export function ReportsClient({
   const [downloading, setDownloading] = React.useState(false);
 
   React.useEffect(() => {
+    // Intentional: show the loading state while (re)fetching on month change.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     Promise.all([
       fetch("/api/neighbors").then((r) => r.json()),

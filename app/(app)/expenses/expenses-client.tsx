@@ -82,6 +82,8 @@ export function ExpensesClient({ currency }: { currency: string }) {
   }, [year, month]);
 
   React.useEffect(() => {
+    // Intentional: load() toggles the loading state while (re)fetching.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 

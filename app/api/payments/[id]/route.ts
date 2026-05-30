@@ -35,7 +35,14 @@ export async function PATCH(
         await db.select().from(payments).where(eq(payments.id, numericId))
       )[0];
       if (existing?.receiptUrl) await deleteFile(existing.receiptUrl);
-      updates.receiptUrl = await uploadFile(file, "payments");
+      try {
+        updates.receiptUrl = await uploadFile(file, "payments");
+      } catch (e) {
+        return NextResponse.json(
+          { error: e instanceof Error ? e.message : "تعذّر رفع الملف" },
+          { status: 400 }
+        );
+      }
     } else if (fd.get("removeReceipt") === "1") {
       const existing = (
         await db.select().from(payments).where(eq(payments.id, numericId))

@@ -19,7 +19,8 @@ import {
   settings as settingsTable,
   monthlyDues as monthlyDuesTable,
 } from "@/lib/db";
-import { formatCurrency, formatShortDate, monthName } from "@/lib/utils";
+import { cn, formatCurrency, formatShortDate, monthName } from "@/lib/utils";
+import { computeFund, round2 } from "@/lib/balance";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,8 @@ export default async function DashboardPage() {
     settingsRow,
     pastPayments,
     pastExpenses,
+    allPaymentsAmt,
+    allExpensesAmt,
   ] = await Promise.all([
     db.select().from(neighborsTable).orderBy(asc(neighborsTable.name)),
     db
@@ -84,6 +87,20 @@ export default async function DashboardPage() {
           lte(expensesTable.year, year)
         )
       ),
+    db
+      .select({
+        year: paymentsTable.year,
+        month: paymentsTable.month,
+        amount: paymentsTable.amount,
+      })
+      .from(paymentsTable),
+    db
+      .select({
+        year: expensesTable.year,
+        month: expensesTable.month,
+        amount: expensesTable.amount,
+      })
+      .from(expensesTable),
   ]);
 
   const currency = settingsRow[0]?.currency ?? "ر.س";
@@ -94,12 +111,40 @@ export default async function DashboardPage() {
   const totalCollected = monthPayments.reduce((s, p) => s + p.amount, 0);
   const totalExpenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
   const net = totalCollected - totalExpenses;
+  const fund = computeFund(allPaymentsAmt, allExpensesAmt);
 
-  const paidIds = new Set(monthPayments.map((p) => p.neighborId));
-  const unpaid = activeNeighbors.filter((n) => !paidIds.has(n.id));
+  // Partial-aware "unpaid this month": remaining = monthly due − paid so far.
+  // (Old logic was binary — any payment, even partial, hid the neighbor.)
+  const paidThisMonth = new Map<number, number>();
+  for (const p of monthPayments) {
+    paidThisMonth.set(
+      p.neighborId,
+      (paidThisMonth.get(p.neighborId) ?? 0) + p.amount
+    );
+  }
+  const unpaid = activeNeighbors
+    .map((n) => ({
+      ...n,
+      remaining: round2(monthlyAmount - (paidThisMonth.get(n.id) ?? 0)),
+    }))
+    .filter((n) => n.remaining > 0);
 
-  // Build last-6-months chart
-  const monthsData: { label: string; income: number; expense: number }[] = [];
+  // Build last-6-months chart + cumulative fund-balance line.
+  const monthKeyOf = (y: number, m: number) => y * 12 + (m - 1);
+  const firstD = new Date(year, month - 1 - 5, 1);
+  const firstKey = monthKeyOf(firstD.getFullYear(), firstD.getMonth() + 1);
+  // Opening balance = all cash movement strictly before the 6-month window.
+  let runningBalance = computeFund(
+    allPaymentsAmt.filter((p) => monthKeyOf(p.year, p.month) < firstKey),
+    allExpensesAmt.filter((e) => monthKeyOf(e.year, e.month) < firstKey)
+  ).balance;
+
+  const monthsData: {
+    label: string;
+    income: number;
+    expense: number;
+    balance: number;
+  }[] = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(year, month - 1 - i, 1);
     const y = d.getFullYear();
@@ -110,12 +155,24 @@ export default async function DashboardPage() {
     const exp = pastExpenses
       .filter((p) => p.year === y && p.month === m)
       .reduce((s, p) => s + p.amount, 0);
+    runningBalance = round2(runningBalance + inc - exp);
     monthsData.push({
       label: `${monthName(m).slice(0, 3)} ${String(y).slice(2)}`,
       income: inc,
       expense: exp,
+      balance: runningBalance,
     });
   }
+
+  // Current-month expenses grouped by category (for the breakdown card).
+  const expenseByCategory = (() => {
+    const map = new Map<string, number>();
+    for (const e of monthExpenses)
+      map.set(e.category, round2((map.get(e.category) ?? 0) + e.amount));
+    return [...map.entries()]
+      .map(([category, amount]) => ({ category, amount }))
+      .sort((a, b) => b.amount - a.amount);
+  })();
 
   const recentExpenses = monthExpenses.slice(0, 5);
 
@@ -127,6 +184,49 @@ export default async function DashboardPage() {
           {monthName(month)} {year}
         </p>
       </div>
+
+      {/* Fund balance — actual cash on hand (all-time collected − expenses) */}
+      <Card
+        className={cn(
+          fund.balance >= 0
+            ? "border-emerald-200 dark:border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-500/5"
+            : "border-red-200 dark:border-red-500/40 bg-red-50/50 dark:bg-red-500/5"
+        )}
+      >
+        <CardContent className="p-6">
+          <div className="flex items-center gap-4">
+            <div
+              className={cn(
+                "w-16 h-16 rounded-2xl flex items-center justify-center shrink-0",
+                fund.balance >= 0
+                  ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                  : "bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400"
+              )}
+            >
+              <Wallet className="w-8 h-8" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                رصيد الصندوق المتبقّي
+              </p>
+              <p
+                className={cn(
+                  "text-3xl lg:text-4xl font-bold tabular-nums mt-1",
+                  fund.balance >= 0
+                    ? "text-emerald-700 dark:text-emerald-300"
+                    : "text-red-700 dark:text-red-300"
+                )}
+              >
+                {formatCurrency(fund.balance, currency)}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                إجمالي المحصّل {formatCurrency(fund.totalCollected, currency)} −
+                المصروفات {formatCurrency(fund.totalExpenses, currency)}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {!monthDue && activeNeighbors.length > 0 && (
         <Card className="border-amber-200 dark:border-amber-500/40 bg-amber-50/50 dark:bg-amber-500/5">
@@ -256,7 +356,7 @@ export default async function DashboardPage() {
                       )}
                     </div>
                     <span className="text-xs tabular-nums text-amber-600 dark:text-amber-400">
-                      {formatCurrency(monthlyAmount, currency)}
+                      {formatCurrency(n.remaining, currency)}
                     </span>
                   </li>
                 ))}
@@ -277,6 +377,42 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {expenseByCategory.length > 0 && (
+        <Card>
+          <CardContent className="p-5">
+            <h2 className="font-semibold mb-3">
+              مصروفات {monthName(month)} حسب الفئة
+            </h2>
+            <div className="space-y-2.5">
+              {expenseByCategory.map((c) => {
+                const pct =
+                  totalExpenses > 0
+                    ? Math.round((c.amount / totalExpenses) * 100)
+                    : 0;
+                return (
+                  <div key={c.category}>
+                    <div className="flex items-center justify-between text-sm mb-1">
+                      <span className="text-slate-700 dark:text-slate-300">
+                        {c.category}
+                      </span>
+                      <span className="tabular-nums text-slate-600 dark:text-slate-400">
+                        {formatCurrency(c.amount, currency)} • {pct}%
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-blue-500 dark:bg-blue-400"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-5">

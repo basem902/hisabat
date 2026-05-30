@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -127,7 +128,15 @@ export function NeighborsClient({ initial }: { initial: Neighbor[] }) {
   }
 
   async function handleDelete(n: Neighbor) {
-    if (!confirm(`حذف ${n.name}؟ سيتم حذف كل مدفوعاته أيضاً.`)) return;
+    if (
+      !confirm(
+        `⚠️ حذف نهائي — ${n.name}\n\n` +
+          `سيُحذف الساكن وكل دفعاته المسجّلة نهائيًا، وستتأثّر إجماليات الصندوق التاريخية. لا يمكن التراجع عن هذا الإجراء.\n\n` +
+          `للاحتفاظ بالسجل بدل الحذف، يكفي تعطيله (إزالة علامة "نشط") من زرّ التعديل.\n\n` +
+          `هل تريد المتابعة بالحذف النهائي؟`
+      )
+    )
+      return;
     const res = await fetch(`/api/neighbors/${n.id}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error("تعذّر الحذف");
@@ -205,7 +214,12 @@ export function NeighborsClient({ initial }: { initial: Neighbor[] }) {
           {list.map((n) => (
             <TableRow key={n.id}>
               <TableCell className="font-medium text-slate-900 dark:text-slate-100">
-                {n.name}
+                <Link
+                  href={`/neighbors/${n.id}`}
+                  className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                >
+                  {n.name}
+                </Link>
                 {n.notes && (
                   <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                     {n.notes}

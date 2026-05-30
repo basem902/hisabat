@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   AlertCircle,
   CheckCircle2,
@@ -10,11 +11,19 @@ import {
   Wallet,
   TrendingUp,
   Users,
+  MessageCircle,
+  Download,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { formatCurrency, monthName } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  cn,
+  formatCurrency,
+  monthName,
+  buildReminderMessage,
+  whatsAppLink,
+} from "@/lib/utils";
 
 interface MonthDebt {
   year: number;
@@ -31,18 +40,28 @@ interface NeighborDebt {
   phone: string | null;
   active: boolean;
   totalOwed: number;
+  surplus: number;
   monthsCount: number;
   missingMonths: MonthDebt[];
 }
 
+interface FundBalance {
+  totalCollected: number;
+  totalExpenses: number;
+  balance: number;
+}
+
 interface Summary {
   currency: string;
+  buildingName: string;
   totalOutstanding: number;
+  totalSurplus: number;
   totalExpected: number;
   totalCollected: number;
   monthsTracked: number;
   debtorsCount: number;
   activeCount: number;
+  fund: FundBalance;
   neighbors: NeighborDebt[];
 }
 
@@ -67,6 +86,44 @@ export function OutstandingsClient() {
     });
   }
 
+  function exportCSV() {
+    if (!data) return;
+    const headers = [
+      "الاسم",
+      "الشقة",
+      "الجوال",
+      "الحالة",
+      "الباقي",
+      "الفائض",
+      "أشهر متأخرة",
+    ];
+    const rows = data.neighbors.map((n) => [
+      n.name,
+      n.apartmentNumber ?? "",
+      n.phone ?? "",
+      n.active ? "نشط" : "غير نشط",
+      String(n.totalOwed),
+      String(n.surplus),
+      String(n.monthsCount),
+    ]);
+    const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const csv = [headers, ...rows]
+      .map((r) => r.map(esc).join(","))
+      .join("\r\n");
+    // Prepend BOM so Excel reads Arabic UTF-8 correctly.
+    const blob = new Blob(["﻿" + csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `المتأخرات-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   if (loading) {
     return (
       <div className="text-center py-12">
@@ -84,7 +141,10 @@ export function OutstandingsClient() {
   }
 
   const debtors = data.neighbors.filter((n) => n.totalOwed > 0);
-  const upToDate = data.neighbors.filter((n) => n.totalOwed === 0 && n.active);
+  const upToDate = data.neighbors.filter(
+    (n) => n.totalOwed === 0 && n.surplus === 0 && n.active
+  );
+  const creditors = data.neighbors.filter((n) => n.surplus > 0);
   const collectionRate =
     data.totalExpected > 0
       ? Math.round((data.totalCollected / data.totalExpected) * 100)
@@ -92,11 +152,19 @@ export function OutstandingsClient() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">المتأخرات</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-          المبلغ المتبقي من جميع الأشهر السابقة + من عليه ديون
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">المتأخرات</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            المبلغ المتبقي من جميع الأشهر السابقة + من عليه ديون
+          </p>
+        </div>
+        {data.neighbors.length > 0 && (
+          <Button variant="outline" size="sm" onClick={exportCSV}>
+            <Download className="w-4 h-4" />
+            تصدير CSV
+          </Button>
+        )}
       </div>
 
       {data.monthsTracked === 0 ? (
@@ -111,6 +179,50 @@ export function OutstandingsClient() {
         </Card>
       ) : (
         <>
+          {/* Fund balance — actual cash on hand */}
+          <Card
+            className={cn(
+              data.fund.balance >= 0
+                ? "border-emerald-200 dark:border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-500/5"
+                : "border-red-200 dark:border-red-500/40 bg-red-50/50 dark:bg-red-500/5"
+            )}
+          >
+            <CardContent className="p-5">
+              <div className="flex items-center gap-4">
+                <div
+                  className={cn(
+                    "w-14 h-14 rounded-2xl flex items-center justify-center shrink-0",
+                    data.fund.balance >= 0
+                      ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                      : "bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400"
+                  )}
+                >
+                  <Wallet className="w-7 h-7" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    رصيد الصندوق المتبقّي
+                  </p>
+                  <p
+                    className={cn(
+                      "text-2xl lg:text-3xl font-bold tabular-nums mt-0.5",
+                      data.fund.balance >= 0
+                        ? "text-emerald-700 dark:text-emerald-300"
+                        : "text-red-700 dark:text-red-300"
+                    )}
+                  >
+                    {formatCurrency(data.fund.balance, data.currency)}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    محصّل {formatCurrency(data.fund.totalCollected, data.currency)}{" "}
+                    − مصروفات{" "}
+                    {formatCurrency(data.fund.totalExpenses, data.currency)}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Big total */}
           <Card
             className={cn(
@@ -159,7 +271,7 @@ export function OutstandingsClient() {
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard
               icon={<Wallet className="w-5 h-5" />}
               color="blue"
@@ -175,11 +287,18 @@ export function OutstandingsClient() {
               note={`${collectionRate}% نسبة التحصيل`}
             />
             <StatCard
-              icon={<Users className="w-5 h-5" />}
-              color="amber"
+              icon={<CheckCircle2 className="w-5 h-5" />}
+              color="emerald"
               label="ملتزمون"
               value={`${upToDate.length} / ${data.activeCount}`}
               note="ساكن نشط"
+            />
+            <StatCard
+              icon={<Users className="w-5 h-5" />}
+              color="amber"
+              label="أرصدة دائنة (فائض)"
+              value={formatCurrency(data.totalSurplus, data.currency)}
+              note={`${creditors.length} دفعوا مقدّماً`}
             />
           </div>
 
@@ -219,6 +338,32 @@ export function OutstandingsClient() {
                               >
                                 <Phone className="w-3 h-3" />
                                 {n.phone}
+                              </a>
+                              {" • "}
+                              <a
+                                href={whatsAppLink(
+                                  n.phone,
+                                  buildReminderMessage({
+                                    name: n.name,
+                                    amount: formatCurrency(
+                                      n.totalOwed,
+                                      data.currency
+                                    ),
+                                    months: n.missingMonths
+                                      .map(
+                                        (m) => `${monthName(m.month)} ${m.year}`
+                                      )
+                                      .join("، "),
+                                    buildingName: data.buildingName,
+                                  })
+                                )}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"
+                              >
+                                <MessageCircle className="w-3 h-3" />
+                                تذكير
                               </a>
                             </>
                           )}
@@ -264,6 +409,13 @@ export function OutstandingsClient() {
                             </div>
                           ))}
                         </div>
+                        <Link
+                          href={`/neighbors/${n.id}`}
+                          className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          عرض كشف الحساب الكامل
+                          <ChevronLeft className="w-3 h-3" />
+                        </Link>
                       </div>
                     )}
                   </div>
@@ -291,6 +443,21 @@ export function OutstandingsClient() {
                 {upToDate.map((n) => (
                   <Badge key={n.id} variant="success">
                     {n.name}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {creditors.length > 0 && (
+            <div>
+              <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-2">
+                أرصدة دائنة — دفعوا مقدّماً ({creditors.length})
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {creditors.map((n) => (
+                  <Badge key={n.id} variant="info">
+                    {n.name} +{formatCurrency(n.surplus, data.currency)}
                   </Badge>
                 ))}
               </div>

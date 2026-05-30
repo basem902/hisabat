@@ -31,6 +31,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { MonthPicker } from "@/components/month-picker";
 import { formatCurrency, formatShortDate, monthName } from "@/lib/utils";
+import { round2 } from "@/lib/balance";
 import type { Neighbor, Payment, MonthlyDue } from "@/lib/db";
 
 const PAYMENT_METHODS = ["نقد", "تحويل بنكي", "STC Pay", "أخرى"];
@@ -42,9 +43,11 @@ function todayISO() {
 export function PaymentsClient({
   neighbors,
   currency,
+  balances,
 }: {
   neighbors: Neighbor[];
   currency: string;
+  balances: Record<number, { owed: number; surplus: number }>;
 }) {
   const router = useRouter();
   const now = new Date();
@@ -87,20 +90,33 @@ export function PaymentsClient({
   }, [year, month]);
 
   React.useEffect(() => {
+    // Intentional: load() toggles the loading state while (re)fetching.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
 
   const activeNeighbors = neighbors.filter((n) => n.active);
-  const paymentByNeighbor = React.useMemo(() => {
-    const map = new Map<number, Payment>();
-    for (const p of payments) map.set(p.neighborId, p);
+  const paymentsByNeighbor = React.useMemo(() => {
+    const map = new Map<number, Payment[]>();
+    for (const p of payments) {
+      const arr = map.get(p.neighborId);
+      if (arr) arr.push(p);
+      else map.set(p.neighborId, [p]);
+    }
     return map;
   }, [payments]);
 
   const monthlyAmount = due?.amount ?? 0;
   const totalExpected = monthlyAmount * activeNeighbors.length;
   const totalCollected = payments.reduce((s, p) => s + p.amount, 0);
-  const paidCount = payments.length;
+  // "Paid" = covered the full monthly due (partial payers still count as unpaid).
+  const paidCount = activeNeighbors.filter((n) => {
+    const t = (paymentsByNeighbor.get(n.id) ?? []).reduce(
+      (s, p) => s + p.amount,
+      0
+    );
+    return monthlyAmount > 0 ? t >= monthlyAmount - 0.005 : t > 0;
+  }).length;
   const unpaidCount = activeNeighbors.length - paidCount;
 
   function openSetDue() {
@@ -327,22 +343,24 @@ export function PaymentsClient({
           </div>
         ) : activeNeighbors.length === 0 ? (
           <div className="p-8 text-center text-slate-400 dark:text-slate-500">
-            لا يوجد جيران نشطون. أضف جيراناً من قائمة "الجيران".
+            لا يوجد جيران نشطون. أضف جيراناً من قائمة «الجيران».
           </div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             {activeNeighbors.map((n) => {
-              const p = paymentByNeighbor.get(n.id);
+              const ps = paymentsByNeighbor.get(n.id) ?? [];
+              const primary = ps[0] ?? null;
               return (
                 <NeighborPaymentRow
                   key={n.id}
                   neighbor={n}
-                  payment={p ?? null}
+                  payments={ps}
                   monthlyAmount={monthlyAmount}
                   currency={currency}
+                  balance={balances[n.id] ?? { owed: 0, surplus: 0 }}
                   onPay={() => openPayDialog(n, null)}
-                  onEdit={() => openPayDialog(n, p ?? null)}
-                  onDelete={() => p && handleDelete(p)}
+                  onEdit={() => openPayDialog(n, primary)}
+                  onDelete={() => primary && handleDelete(primary)}
                 />
               );
             })}
@@ -590,27 +608,40 @@ function StatCard({
 
 function NeighborPaymentRow({
   neighbor,
-  payment,
+  payments,
   monthlyAmount,
   currency,
+  balance,
   onPay,
   onEdit,
   onDelete,
 }: {
   neighbor: Neighbor;
-  payment: Payment | null;
+  payments: Payment[];
   monthlyAmount: number;
   currency: string;
+  balance: { owed: number; surplus: number };
   onPay: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const paid = !!payment;
+  const total = round2(payments.reduce((s, p) => s + p.amount, 0));
+  const count = payments.length;
+  const primary = payments[0] ?? null;
+  const hasPaid = count > 0;
+  const fully =
+    hasPaid && (monthlyAmount > 0 ? total >= monthlyAmount - 0.005 : true);
+  const partial = hasPaid && !fully;
+  const remainingThisMonth =
+    monthlyAmount > 0 ? round2(monthlyAmount - total) : 0;
+
   return (
     <div className="flex items-center gap-3 px-5 py-4 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
       <div className="shrink-0">
-        {paid ? (
+        {fully ? (
           <CheckCircle2 className="w-6 h-6 text-emerald-500 dark:text-emerald-400" />
+        ) : partial ? (
+          <Clock className="w-6 h-6 text-amber-500 dark:text-amber-400" />
         ) : (
           <Circle className="w-6 h-6 text-slate-300 dark:text-slate-600" />
         )}
@@ -623,20 +654,41 @@ function NeighborPaymentRow({
           {neighbor.apartmentNumber && (
             <Badge>شقة {neighbor.apartmentNumber}</Badge>
           )}
+          {balance.owed > 0 ? (
+            <Badge variant="warning">
+              باقٍ {formatCurrency(balance.owed, currency)}
+            </Badge>
+          ) : balance.surplus > 0 ? (
+            <Badge variant="info">
+              فائض {formatCurrency(balance.surplus, currency)}
+            </Badge>
+          ) : null}
         </div>
-        {paid && payment ? (
+        {hasPaid && primary ? (
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             دُفع{" "}
             <span className="font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
-              {formatCurrency(payment.amount, currency)}
+              {formatCurrency(total, currency)}
             </span>{" "}
-            • {payment.paymentMethod} • {formatShortDate(payment.paidAt)}
-            {payment.receiptUrl && (
+            {count > 1 ? (
+              <>• {count} دفعات</>
+            ) : (
+              <>
+                • {primary.paymentMethod} • {formatShortDate(primary.paidAt)}
+              </>
+            )}
+            {partial && (
+              <span className="font-medium text-amber-600 dark:text-amber-400">
+                {" "}
+                — باقي هذا الشهر {formatCurrency(remainingThisMonth, currency)}
+              </span>
+            )}
+            {count === 1 && primary.receiptUrl && (
               <>
                 {" "}
                 •{" "}
                 <a
-                  href={payment.receiptUrl}
+                  href={primary.receiptUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
@@ -646,9 +698,9 @@ function NeighborPaymentRow({
                 </a>
               </>
             )}
-            {payment.notes && (
+            {count === 1 && primary.notes && (
               <span className="block text-slate-400 dark:text-slate-500 mt-0.5">
-                {payment.notes}
+                {primary.notes}
               </span>
             )}
           </p>
@@ -664,7 +716,7 @@ function NeighborPaymentRow({
         )}
       </div>
       <div className="shrink-0 flex items-center gap-1">
-        {paid ? (
+        {hasPaid ? (
           <>
             <Button
               variant="ghost"
