@@ -4,28 +4,13 @@ import {
   Text,
   View,
   StyleSheet,
-  Font,
 } from "@react-pdf/renderer";
-import path from "path";
+import { ensureFont } from "./fonts";
 
-let fontsRegistered = false;
-function ensureFonts() {
-  if (fontsRegistered) return;
-  Font.register({
-    family: "Cairo",
-    fonts: [
-      { src: path.join(process.cwd(), "lib/pdf/fonts/Cairo-Regular.ttf") },
-      {
-        src: path.join(process.cwd(), "lib/pdf/fonts/Cairo-Bold.ttf"),
-        fontWeight: 700,
-      },
-    ],
-  });
-  fontsRegistered = true;
-}
+const FONT = "CairoStatement";
 
 const styles = StyleSheet.create({
-  page: { fontFamily: "Cairo", fontSize: 10, padding: 32, color: "#0f172a" },
+  page: { fontFamily: FONT, fontSize: 10, padding: 32, color: "#0f172a" },
   header: {
     flexDirection: "row-reverse",
     justifyContent: "space-between",
@@ -172,7 +157,7 @@ const fmtDate = (d: string) =>
   });
 
 export function NeighborStatement({ data }: { data: StatementData }) {
-  ensureFonts();
+  ensureFont(FONT);
   const ml = data.monthLabel;
   const balanceLabel =
     data.owed > 0 ? "الباقي عليه" : data.surplus > 0 ? "فائض (دفع مقدّم)" : "الحالة";
