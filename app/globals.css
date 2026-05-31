@@ -1,7 +1,9 @@
 @import "tailwindcss";
 
-/* Class-based dark mode */
-@variant dark (&:where(.dark, .dark *));
+/* Class-based dark mode (Tailwind v4 — must be @custom-variant, not @variant,
+   or `dark:` utilities fall back to the prefers-color-scheme media query and
+   ignore the .dark class toggle). */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-sans: var(--font-cairo), system-ui, sans-serif;
