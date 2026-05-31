@@ -4,31 +4,14 @@ import {
   Text,
   View,
   StyleSheet,
-  Font,
 } from "@react-pdf/renderer";
-import path from "path";
+import { ensureFont } from "./fonts";
 
-let fontsRegistered = false;
-function ensureFonts() {
-  if (fontsRegistered) return;
-  Font.register({
-    family: "Cairo",
-    fonts: [
-      {
-        src: path.join(process.cwd(), "lib/pdf/fonts/Cairo-Regular.ttf"),
-      },
-      {
-        src: path.join(process.cwd(), "lib/pdf/fonts/Cairo-Bold.ttf"),
-        fontWeight: 700,
-      },
-    ],
-  });
-  fontsRegistered = true;
-}
+const FONT = "CairoReport";
 
 const styles = StyleSheet.create({
   page: {
-    fontFamily: "Cairo",
+    fontFamily: FONT,
     fontSize: 10,
     padding: 32,
     color: "#0f172a",
@@ -239,7 +222,7 @@ function statusOf(row: NeighborStatusRow): {
 }
 
 export function MonthlyReport({ data }: { data: ReportData }) {
-  ensureFonts();
+  ensureFont(FONT);
 
   return (
     <Document>
