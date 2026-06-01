@@ -208,9 +208,7 @@ export default async function DashboardPage() {
     }));
 
   // ── Indicators: collection rate, counters, top debtors ──
-  const totalObligationAll = round2(
-    summary.totalObligation + summary.emergencyObligation
-  );
+  const totalObligationAll = summary.totalObligation;
   const totalCollectedAll = fundBreakdown.totalCollected;
   const collectionRate =
     totalObligationAll > 0
