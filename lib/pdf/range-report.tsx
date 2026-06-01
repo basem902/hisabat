@@ -178,7 +178,8 @@ export function RangeReport({ data }: { data: RangeReportData }) {
         {/* Summary cards */}
         <View style={styles.summaryRow}>
           <SummaryCard label="المتوقّع" value={fmt(data.totals.expected, c)} color="#2563eb" />
-          <SummaryCard label="المحصّل" value={fmt(data.totals.collected, c)} color="#059669" />
+          <SummaryCard label="اشتراكات محصّلة" value={fmt(data.totals.collected, c)} color="#059669" />
+          <SummaryCard label="طوارئ محصّلة" value={fmt(data.totals.emergencyCollected, c)} color="#1d4ed8" />
           <SummaryCard label="المصروفات" value={fmt(data.totals.expenses, c)} color="#dc2626" />
           <SummaryCard
             label="الصافي"

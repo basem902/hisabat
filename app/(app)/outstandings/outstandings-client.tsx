@@ -13,6 +13,7 @@ import {
   Users,
   MessageCircle,
   Download,
+  Zap,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,8 +42,11 @@ interface NeighborDebt {
   active: boolean;
   totalOwed: number;
   surplus: number;
+  monthlyOwed: number;
+  emergencyOwed: number;
   monthsCount: number;
   missingMonths: MonthDebt[];
+  emergencyUnpaid: { title: string; owed: number }[];
 }
 
 interface FundBalance {
@@ -325,9 +329,16 @@ export function OutstandingsClient() {
                             <Badge>شقة {n.apartmentNumber}</Badge>
                           )}
                           {!n.active && <Badge variant="warning">غير نشط</Badge>}
+                          {n.emergencyOwed > 0 && (
+                            <Badge variant="info">
+                              <Zap className="w-3 h-3" /> طوارئ
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                           {n.monthsCount} شهر متأخر
+                          {n.emergencyOwed > 0 &&
+                            ` • طوارئ ${formatCurrency(n.emergencyOwed, data.currency)}`}
                           {n.phone && (
                             <>
                               {" • "}
@@ -405,6 +416,23 @@ export function OutstandingsClient() {
                               </span>
                               <span className="font-semibold text-amber-600 dark:text-amber-400 tabular-nums">
                                 {formatCurrency(m.owed, data.currency)}
+                              </span>
+                            </div>
+                          ))}
+                          {n.emergencyUnpaid.map((e, i) => (
+                            <div
+                              key={`${e.title}-${i}`}
+                              className="flex items-center justify-between gap-3 px-3 py-2.5 text-sm"
+                            >
+                              <span className="inline-flex items-center gap-1.5 text-blue-700 dark:text-blue-300">
+                                <Zap className="w-3.5 h-3.5" />
+                                {e.title}
+                              </span>
+                              <span className="text-xs text-slate-500 dark:text-slate-400">
+                                رسم طارئ
+                              </span>
+                              <span className="font-semibold text-blue-600 dark:text-blue-400 tabular-nums">
+                                {formatCurrency(e.owed, data.currency)}
                               </span>
                             </div>
                           ))}

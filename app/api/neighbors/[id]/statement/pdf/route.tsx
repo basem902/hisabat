@@ -7,6 +7,7 @@ import {
   payments as paymentsTable,
   monthlyDues as monthlyDuesTable,
   settings as settingsTable,
+  specialChargeAssignments as assignmentsTable,
 } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { buildLedgers } from "@/lib/balance";
@@ -28,7 +29,7 @@ export async function GET(
   if (!numericId)
     return NextResponse.json({ error: "بيانات غير صحيحة" }, { status: 400 });
 
-  const [neighborRows, dues, neighborPayments, settingsRows] =
+  const [neighborRows, dues, neighborPayments, settingsRows, neighborAssignments] =
     await Promise.all([
       db
         .select()
@@ -42,6 +43,10 @@ export async function GET(
         .where(eq(paymentsTable.neighborId, numericId))
         .orderBy(asc(paymentsTable.paidAt)),
       db.select().from(settingsTable).limit(1),
+      db
+        .select()
+        .from(assignmentsTable)
+        .where(eq(assignmentsTable.neighborId, numericId)),
     ]);
 
   const neighbor = neighborRows[0];
@@ -49,7 +54,12 @@ export async function GET(
     return NextResponse.json({ error: "غير موجود" }, { status: 404 });
 
   const settings = settingsRows[0];
-  const ledger = buildLedgers([neighbor], dues, neighborPayments)[0];
+  const ledger = buildLedgers(
+    [neighbor],
+    dues,
+    neighborPayments,
+    neighborAssignments
+  )[0];
 
   const data: StatementData = {
     buildingName: settings?.buildingName ?? "حسابات المبنى",
