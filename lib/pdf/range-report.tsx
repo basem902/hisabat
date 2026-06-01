@@ -180,6 +180,13 @@ export function RangeReport({ data }: { data: RangeReportData }) {
           <SummaryCard label="المتوقّع" value={fmt(data.totals.expected, c)} color="#2563eb" />
           <SummaryCard label="اشتراكات محصّلة" value={fmt(data.totals.collected, c)} color="#059669" />
           <SummaryCard label="طوارئ محصّلة" value={fmt(data.totals.emergencyCollected, c)} color="#1d4ed8" />
+          {data.totals.emergencyObligation > 0 && (
+            <SummaryCard
+              label="طوارئ متبقّية"
+              value={fmt(data.totals.emergencyOutstanding, c)}
+              color={data.totals.emergencyOutstanding > 0 ? "#d97706" : "#059669"}
+            />
+          )}
           <SummaryCard label="المصروفات" value={fmt(data.totals.expenses, c)} color="#dc2626" />
           <SummaryCard
             label="الصافي"
@@ -302,12 +309,13 @@ export function RangeReport({ data }: { data: RangeReportData }) {
         </View>
         <View style={styles.table}>
           <View style={styles.thead}>
-            <Text style={[styles.th, { width: "26%", textAlign: "right" }]}>الاسم</Text>
-            <Text style={[styles.th, { width: "10%" }]}>الشقة</Text>
-            <Text style={[styles.th, { width: "16%" }]}>المستحق</Text>
-            <Text style={[styles.th, { width: "16%" }]}>المدفوع</Text>
-            <Text style={[styles.th, { width: "16%" }]}>المتبقّي/الفائض</Text>
-            <Text style={[styles.th, { width: "16%" }]}>الحالة</Text>
+            <Text style={[styles.th, { width: "22%", textAlign: "right" }]}>الاسم</Text>
+            <Text style={[styles.th, { width: "8%" }]}>الشقة</Text>
+            <Text style={[styles.th, { width: "15%" }]}>مستحق</Text>
+            <Text style={[styles.th, { width: "15%" }]}>مدفوع</Text>
+            <Text style={[styles.th, { width: "15%" }]}>الرصيد</Text>
+            <Text style={[styles.th, { width: "13%" }]}>طوارئ</Text>
+            <Text style={[styles.th, { width: "12%" }]}>الحالة</Text>
           </View>
           {data.neighbors.map((n, i) => {
             const st = STATUS_STYLE[n.status] ?? STATUS_STYLE["لم يدفع"];
@@ -318,20 +326,35 @@ export function RangeReport({ data }: { data: RangeReportData }) {
                   ? `+${fmt(n.surplus, c)}`
                   : "—";
             const balColor = n.owed > 0 ? "#d97706" : n.surplus > 0 ? "#1d4ed8" : "#64748b";
+            const emText =
+              n.emergencyObligation > 0
+                ? n.emergencyOwed > 0
+                  ? `-${fmt(n.emergencyOwed, c)}`
+                  : "مكتمل"
+                : "—";
+            const emColor =
+              n.emergencyObligation > 0
+                ? n.emergencyOwed > 0
+                  ? "#d97706"
+                  : "#059669"
+                : "#94a3b8";
             return (
               <View key={n.id} style={[styles.tr, i % 2 === 1 ? styles.trAlt : {}]} wrap={false}>
-                <Text style={[styles.td, styles.tdName, { width: "26%" }]}>{n.name}</Text>
-                <Text style={[styles.td, styles.tdMuted, { width: "10%" }]}>
+                <Text style={[styles.td, styles.tdName, { width: "22%" }]}>{n.name}</Text>
+                <Text style={[styles.td, styles.tdMuted, { width: "8%" }]}>
                   {n.apartmentNumber ?? "—"}
                 </Text>
-                <Text style={[styles.td, { width: "16%" }]}>{fmt(n.obligation, c)}</Text>
-                <Text style={[styles.td, { width: "16%", color: n.paid > 0 ? "#059669" : "#94a3b8", fontWeight: 700 }]}>
+                <Text style={[styles.td, { width: "15%" }]}>{fmt(n.obligation, c)}</Text>
+                <Text style={[styles.td, { width: "15%", color: n.paid > 0 ? "#059669" : "#94a3b8", fontWeight: 700 }]}>
                   {fmt(n.paid, c)}
                 </Text>
-                <Text style={[styles.td, { width: "16%", color: balColor, fontWeight: 700 }]}>
+                <Text style={[styles.td, { width: "15%", color: balColor, fontWeight: 700 }]}>
                   {balText}
                 </Text>
-                <View style={[styles.td, { width: "16%" }]}>
+                <Text style={[styles.td, { width: "13%", color: emColor, fontWeight: 700 }]}>
+                  {emText}
+                </Text>
+                <View style={[styles.td, { width: "12%" }]}>
                   <Text style={[styles.badge, { backgroundColor: st.bg, color: st.fg }]}>
                     {n.status}
                   </Text>
@@ -340,6 +363,59 @@ export function RangeReport({ data }: { data: RangeReportData }) {
             );
           })}
         </View>
+
+        {/* Emergency charges raised within the window */}
+        {data.emergencyCharges.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>رسوم الطوارئ خلال الفترة</Text>
+            </View>
+            <View style={styles.table}>
+              <View style={styles.thead}>
+                <Text style={[styles.th, { width: "30%", textAlign: "right" }]}>الرسم</Text>
+                <Text style={[styles.th, { width: "14%" }]}>التاريخ</Text>
+                <Text style={[styles.th, { width: "15%" }]}>المستحق</Text>
+                <Text style={[styles.th, { width: "15%" }]}>المحصّل</Text>
+                <Text style={[styles.th, { width: "14%" }]}>المتبقّي</Text>
+                <Text style={[styles.th, { width: "12%" }]}>المسددون</Text>
+              </View>
+              {data.emergencyCharges.map((ch, i) => (
+                <View
+                  key={ch.id}
+                  style={[styles.tr, i % 2 === 1 ? styles.trAlt : {}]}
+                  wrap={false}
+                >
+                  <Text style={[styles.td, styles.tdName, { width: "30%" }]}>{ch.title}</Text>
+                  <Text style={[styles.td, styles.tdMuted, { width: "14%" }]}>
+                    {ch.chargeDate ? fmtDate(ch.chargeDate) : "—"}
+                  </Text>
+                  <Text style={[styles.td, { width: "15%" }]}>{fmt(ch.obligation, c)}</Text>
+                  <Text style={[styles.td, { width: "15%", color: "#059669", fontWeight: 700 }]}>
+                    {fmt(ch.collected, c)}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.td,
+                      { width: "14%", fontWeight: 700, color: ch.outstanding > 0 ? "#d97706" : "#64748b" },
+                    ]}
+                  >
+                    {ch.outstanding > 0 ? fmt(ch.outstanding, c) : "—"}
+                  </Text>
+                  <Text style={[styles.td, { width: "12%" }]}>
+                    {ch.payers}/{ch.assignees}
+                  </Text>
+                </View>
+              ))}
+              <View style={styles.tfoot}>
+                <Text style={[styles.tfCell, { width: "44%", textAlign: "right" }]}>الإجمالي</Text>
+                <Text style={[styles.tfCell, { width: "15%" }]}>{fmt(data.totals.emergencyObligation, c)}</Text>
+                <Text style={[styles.tfCell, { width: "15%", color: "#059669" }]}>{fmt(data.totals.emergencyCollected, c)}</Text>
+                <Text style={[styles.tfCell, { width: "14%", color: "#d97706" }]}>{fmt(data.totals.emergencyOutstanding, c)}</Text>
+                <Text style={[styles.tfCell, { width: "12%" }]}> </Text>
+              </View>
+            </View>
+          </>
+        )}
 
         {/* Expenses by category */}
         <View style={styles.sectionHeader}>
