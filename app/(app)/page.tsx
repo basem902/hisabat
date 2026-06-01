@@ -1,16 +1,6 @@
 import Link from "next/link";
 import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm";
-import {
-  TrendingUp,
-  TrendingDown,
-  Wallet,
-  AlertCircle,
-  ArrowLeft,
-  Receipt,
-  Coins,
-  Edit3,
-  Zap,
-} from "lucide-react";
+import { AlertCircle, ArrowLeft, Receipt, Edit3, Zap } from "lucide-react";
 import {
   db,
   neighbors as neighborsTable,
@@ -35,6 +25,9 @@ import { Button } from "@/components/ui/button";
 import { DashboardChart } from "./dashboard-chart";
 import { FundBreakdown } from "./fund-breakdown";
 import { DashboardDebtors } from "./dashboard-debtors";
+import { DashboardOverview } from "./dashboard-overview";
+import { DashboardAlerts, type DashboardAlert } from "./dashboard-alerts";
+import { DistributionChart } from "./distribution-chart";
 
 export const dynamic = "force-dynamic";
 
@@ -125,7 +118,6 @@ export default async function DashboardPage() {
   const totalExpected = monthlyAmount * activeNeighbors.length;
   const totalCollected = monthPayments.reduce((s, p) => s + p.amount, 0);
   const totalExpenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
-  const net = totalCollected - totalExpenses;
 
   // Build last-6-months chart + cumulative fund-balance line.
   const monthKeyOf = (y: number, m: number) => y * 12 + (m - 1);
@@ -215,6 +207,76 @@ export default async function DashboardPage() {
         })),
     }));
 
+  // ── Indicators: collection rate, counters, top debtors ──
+  const totalObligationAll = round2(
+    summary.totalObligation + summary.emergencyObligation
+  );
+  const totalCollectedAll = fundBreakdown.totalCollected;
+  const collectionRate =
+    totalObligationAll > 0
+      ? Math.min(
+          100,
+          Math.round(
+            (round2(summary.collectedTowardDues + summary.emergencyCollected) /
+              totalObligationAll) *
+              100
+          )
+        )
+      : 100;
+  const counters = {
+    debtors: summary.debtorsCount,
+    compliant: Math.max(0, activeNeighbors.length - summary.debtorsCount),
+    surplus: ledgers.filter((l) => l.surplus > 0).length,
+  };
+  const topDebtors = debtors
+    .slice(0, 3)
+    .map((d) => ({ id: d.id, name: d.name, owed: d.owed }));
+
+  // ── Smart alerts ──
+  const alerts: DashboardAlert[] = [];
+  if (fundBreakdown.balance < 0)
+    alerts.push({
+      kind: "fund",
+      title: "رصيد الصندوق سالب",
+      detail: `العجز ${formatCurrency(
+        Math.abs(fundBreakdown.balance),
+        currency
+      )} — المصروفات تجاوزت المُحصّل`,
+    });
+  const longOverdue = ledgers.filter((l) => l.missingMonths.length >= 2);
+  if (longOverdue.length > 0)
+    alerts.push({
+      kind: "overdue",
+      title: `${longOverdue.length} ساكن متأخّر شهرين فأكثر`,
+      detail:
+        longOverdue
+          .slice(0, 3)
+          .map((l) => l.name)
+          .join("، ") + (longOverdue.length > 3 ? " وآخرون" : ""),
+      href: "/outstandings",
+    });
+  if (summary.emergencyOutstanding > 0)
+    alerts.push({
+      kind: "emergency",
+      title: "رسوم طوارئ غير مكتملة التحصيل",
+      detail: `باقٍ ${formatCurrency(
+        summary.emergencyOutstanding,
+        currency
+      )} من ${formatCurrency(summary.emergencyObligation, currency)}`,
+      href: "/charges",
+    });
+
+  // ── Fund distribution (pie) ──
+  const pieData = [
+    {
+      name: "اشتراكات محصّلة",
+      value: fundBreakdown.subscriptions,
+      color: "#10b981",
+    },
+    { name: "طوارئ محصّلة", value: fundBreakdown.emergency, color: "#3b82f6" },
+    { name: "متأخرات", value: summary.totalOutstanding, color: "#f59e0b" },
+  ].filter((s) => s.value > 0);
+
   return (
     <div className="space-y-6">
       <div>
@@ -226,6 +288,9 @@ export default async function DashboardPage() {
 
       {/* Fund balance with detailed breakdown (عرض) */}
       <FundBreakdown breakdown={fundBreakdown} currency={currency} />
+
+      {/* Smart alerts */}
+      <DashboardAlerts alerts={alerts} />
 
       {/* Emergency charges summary */}
       {summary.emergencyObligation > 0 && (
@@ -295,57 +360,27 @@ export default async function DashboardPage() {
         </Card>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard
-          icon={<Coins className="w-5 h-5" />}
-          color="blue"
-          label="مستحق الشهر"
-          value={monthDue ? formatCurrency(monthlyAmount, currency) : "—"}
-          note="على كل ساكن"
-        />
-        <StatCard
-          icon={<Wallet className="w-5 h-5" />}
-          color="blue"
-          label="المتوقّع"
-          value={formatCurrency(totalExpected, currency)}
-          note={`${activeNeighbors.length} ساكن`}
-        />
-        <StatCard
-          icon={<TrendingUp className="w-5 h-5" />}
-          color="emerald"
-          label="المحصّل"
-          value={formatCurrency(totalCollected, currency)}
-        />
-        <StatCard
-          icon={<TrendingDown className="w-5 h-5" />}
-          color="red"
-          label="المصروفات"
-          value={formatCurrency(totalExpenses, currency)}
-        />
-      </div>
-
-      <Card>
-        <CardContent className="p-5">
-          <div className="flex items-center justify-between mb-3">
-            <p className="font-semibold">صافي الشهر</p>
-            <Badge variant={net >= 0 ? "success" : "danger"}>
-              {net >= 0 ? "فائض" : "عجز"}
-            </Badge>
-          </div>
-          <p
-            className={`text-3xl font-bold tabular-nums ${
-              net >= 0
-                ? "text-emerald-600 dark:text-emerald-400"
-                : "text-red-600 dark:text-red-400"
-            }`}
-          >
-            {formatCurrency(net, currency)}
-          </p>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            (المحصّل − المصروفات)
-          </p>
-        </CardContent>
-      </Card>
+      <DashboardOverview
+        currency={currency}
+        month={{
+          dueAmount: monthDue ? monthlyAmount : null,
+          expected: totalExpected,
+          collected: totalCollected,
+          expenses: totalExpenses,
+          activeCount: activeNeighbors.length,
+          monthLabel: `${monthName(month)} ${year}`,
+        }}
+        all={{
+          obligation: totalObligationAll,
+          collected: totalCollectedAll,
+          expenses: fundBreakdown.totalExpenses,
+          outstanding: summary.totalOutstanding,
+          balance: fundBreakdown.balance,
+        }}
+        collectionRate={collectionRate}
+        counters={counters}
+        topDebtors={topDebtors}
+      />
 
       {/* Cumulative debtors (subscriptions + emergency) — details + WhatsApp */}
       <DashboardDebtors
@@ -353,6 +388,20 @@ export default async function DashboardPage() {
         currency={currency}
         buildingName={buildingName}
       />
+
+      {pieData.length > 0 && (
+        <Card>
+          <CardContent className="p-5">
+            <div className="mb-2">
+              <h2 className="font-semibold">توزيع المستحقات</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                المحصّل (اشتراكات + طوارئ) مقابل المتأخرات
+              </p>
+            </div>
+            <DistributionChart data={pieData} currency={currency} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-5">
@@ -449,54 +498,5 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
     </div>
-  );
-}
-
-function StatCard({
-  icon,
-  color,
-  label,
-  value,
-  note,
-}: {
-  icon: React.ReactNode;
-  color: "blue" | "emerald" | "amber" | "red";
-  label: string;
-  value: string;
-  note?: string;
-}) {
-  const colors = {
-    blue: "bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400",
-    emerald:
-      "bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-    amber:
-      "bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400",
-    red: "bg-red-50 dark:bg-red-500/15 text-red-600 dark:text-red-400",
-  };
-  return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center ${colors[color]}`}
-          >
-            {icon}
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {label}
-            </p>
-            <p className="text-base font-bold tabular-nums truncate">
-              {value}
-            </p>
-            {note && (
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
-                {note}
-              </p>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
