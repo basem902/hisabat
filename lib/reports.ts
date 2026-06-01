@@ -24,6 +24,10 @@ import {
 
 const mk = (y: number, m: number) => y * 12 + (m - 1);
 const endOfMonth = (y: number, m: number) => new Date(y, m, 0);
+const parseDateYM = (dateString: string) => {
+  const [year, month] = dateString.split("-").map(Number);
+  return { year, month };
+};
 
 export interface RangeMonth {
   year: number;
@@ -133,8 +137,8 @@ export function buildRangeReport(
   const chargeInWindow = new Set<number>();
   const chargeMeta = new Map<number, { title: string; chargeDate: string }>();
   for (const ch of charges) {
-    const cd = new Date(ch.chargeDate);
-    if (inRange(cd.getFullYear(), cd.getMonth() + 1)) {
+    const cd = parseDateYM(ch.chargeDate);
+    if (inRange(cd.year, cd.month)) {
       chargeInWindow.add(ch.id);
       chargeMeta.set(ch.id, { title: ch.title, chargeDate: ch.chargeDate });
     }
@@ -274,9 +278,6 @@ export function buildRangeReport(
 
   const totalExpected = round2(perMonth.reduce((s, m) => s + m.expected, 0));
   const totalCollected = round2(perMonth.reduce((s, m) => s + m.collected, 0));
-  const emergencyCollected = round2(
-    emergencyPaymentsWindow.reduce((s, p) => s + p.amount, 0)
-  );
   const totalExpenses = round2(perMonth.reduce((s, m) => s + m.expenses, 0));
 
   const rangeNeighbors: RangeNeighbor[] = ledgers
@@ -339,7 +340,7 @@ export function buildRangeReport(
       expected: totalExpected,
       collected: totalCollected,
       emergencyObligation: emergencySummary.emergencyObligation,
-      emergencyCollected,
+      emergencyCollected: emergencySummary.emergencyCollected,
       emergencyOutstanding: emergencySummary.emergencyOutstanding,
       expenses: totalExpenses,
       net: round2(totalCollected - totalExpenses),
