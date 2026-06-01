@@ -208,6 +208,9 @@ export function buildRangeReport(
       assignees: a.assignees,
     }))
     .sort((x, y) => (x.chargeDate < y.chargeDate ? -1 : 1));
+  const emergencyCollectedTotal = round2(
+    emergencyChargesList.reduce((s, ch) => s + ch.collected, 0)
+  );
 
   // Per-neighbor ledgers scoped to the window (carry-over within the range).
   const ledgers = buildLedgers(
@@ -340,7 +343,7 @@ export function buildRangeReport(
       expected: totalExpected,
       collected: totalCollected,
       emergencyObligation: emergencySummary.emergencyObligation,
-      emergencyCollected: emergencySummary.emergencyCollected,
+      emergencyCollected: emergencyCollectedTotal,
       emergencyOutstanding: emergencySummary.emergencyOutstanding,
       expenses: totalExpenses,
       net: round2(totalCollected - totalExpenses),
