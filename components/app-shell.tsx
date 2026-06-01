@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   AlertCircle,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ const NAV = [
   { href: "/neighbors", label: "الجيران", icon: Users },
   { href: "/payments", label: "المدفوعات", icon: Wallet },
   { href: "/expenses", label: "المصروفات", icon: Receipt },
+  { href: "/charges", label: "رسوم الطوارئ", icon: Zap },
   { href: "/outstandings", label: "المتأخرات", icon: AlertCircle },
   { href: "/reports", label: "التقارير", icon: FileBarChart },
   { href: "/settings", label: "الإعدادات", icon: Settings },

@@ -1,15 +1,15 @@
 import Link from "next/link";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm";
 import {
   TrendingUp,
   TrendingDown,
   Wallet,
   AlertCircle,
-  CheckCircle2,
   ArrowLeft,
   Receipt,
   Coins,
   Edit3,
+  Zap,
 } from "lucide-react";
 import {
   db,
@@ -18,13 +18,23 @@ import {
   expenses as expensesTable,
   settings as settingsTable,
   monthlyDues as monthlyDuesTable,
+  specialCharges as specialChargesTable,
+  specialChargeAssignments as assignmentsTable,
 } from "@/lib/db";
 import { cn, formatCurrency, formatShortDate, monthName } from "@/lib/utils";
-import { computeFund, round2 } from "@/lib/balance";
+import {
+  computeFund,
+  round2,
+  buildLedgers,
+  summarizeLedgers,
+  computeFundBreakdown,
+} from "@/lib/balance";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DashboardChart } from "./dashboard-chart";
+import { FundBreakdown } from "./fund-breakdown";
+import { DashboardDebtors } from "./dashboard-debtors";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +59,11 @@ export default async function DashboardPage() {
       .select()
       .from(paymentsTable)
       .where(
-        and(eq(paymentsTable.year, year), eq(paymentsTable.month, month))
+        and(
+          eq(paymentsTable.year, year),
+          eq(paymentsTable.month, month),
+          isNull(paymentsTable.specialChargeId)
+        )
       ),
     db
       .select()
@@ -104,6 +118,7 @@ export default async function DashboardPage() {
   ]);
 
   const currency = settingsRow[0]?.currency ?? "ر.س";
+  const buildingName = settingsRow[0]?.buildingName ?? "حسابات المبنى";
   const monthDue = monthDueRow[0];
   const activeNeighbors = allNeighbors.filter((n) => n.active);
   const monthlyAmount = monthDue?.amount ?? 0;
@@ -111,23 +126,6 @@ export default async function DashboardPage() {
   const totalCollected = monthPayments.reduce((s, p) => s + p.amount, 0);
   const totalExpenses = monthExpenses.reduce((s, e) => s + e.amount, 0);
   const net = totalCollected - totalExpenses;
-  const fund = computeFund(allPaymentsAmt, allExpensesAmt);
-
-  // Partial-aware "unpaid this month": remaining = monthly due − paid so far.
-  // (Old logic was binary — any payment, even partial, hid the neighbor.)
-  const paidThisMonth = new Map<number, number>();
-  for (const p of monthPayments) {
-    paidThisMonth.set(
-      p.neighborId,
-      (paidThisMonth.get(p.neighborId) ?? 0) + p.amount
-    );
-  }
-  const unpaid = activeNeighbors
-    .map((n) => ({
-      ...n,
-      remaining: round2(monthlyAmount - (paidThisMonth.get(n.id) ?? 0)),
-    }))
-    .filter((n) => n.remaining > 0);
 
   // Build last-6-months chart + cumulative fund-balance line.
   const monthKeyOf = (y: number, m: number) => y * 12 + (m - 1);
@@ -176,6 +174,47 @@ export default async function DashboardPage() {
 
   const recentExpenses = monthExpenses.slice(0, 5);
 
+  // ── Cumulative (all-time) data: debtors panel, fund breakdown, emergency ──
+  const [allDues, allPaymentsFull, allAssignments, allCharges] =
+    await Promise.all([
+      db.select().from(monthlyDuesTable),
+      db.select().from(paymentsTable),
+      db.select().from(assignmentsTable),
+      db.select().from(specialChargesTable),
+    ]);
+  const ledgers = buildLedgers(
+    allNeighbors,
+    allDues,
+    allPaymentsFull,
+    allAssignments
+  );
+  const summary = summarizeLedgers(ledgers);
+  const fundBreakdown = computeFundBreakdown(allPaymentsFull, allExpensesAmt);
+  const chargeTitle = new Map(allCharges.map((c) => [c.id, c.title]));
+  const debtors = ledgers
+    .filter((l) => l.owed > 0)
+    .sort((a, b) => b.owed - a.owed)
+    .map((l) => ({
+      id: l.id,
+      name: l.name,
+      apartmentNumber: l.apartmentNumber,
+      phone: l.phone,
+      owed: l.owed,
+      monthlyOwed: l.monthlyOwed,
+      emergencyOwed: l.emergencyOwed,
+      missingMonths: l.missingMonths.map((m) => ({
+        year: m.year,
+        month: m.month,
+        remaining: m.remaining,
+      })),
+      emergencyUnpaid: l.emergencyItems
+        .filter((it) => it.owed > 0)
+        .map((it) => ({
+          title: chargeTitle.get(it.chargeId) ?? "رسوم طارئة",
+          owed: it.owed,
+        })),
+    }));
+
   return (
     <div className="space-y-6">
       <div>
@@ -185,48 +224,50 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      {/* Fund balance — actual cash on hand (all-time collected − expenses) */}
-      <Card
-        className={cn(
-          fund.balance >= 0
-            ? "border-emerald-200 dark:border-emerald-500/40 bg-emerald-50/50 dark:bg-emerald-500/5"
-            : "border-red-200 dark:border-red-500/40 bg-red-50/50 dark:bg-red-500/5"
-        )}
-      >
-        <CardContent className="p-6">
-          <div className="flex items-center gap-4">
-            <div
-              className={cn(
-                "w-16 h-16 rounded-2xl flex items-center justify-center shrink-0",
-                fund.balance >= 0
-                  ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                  : "bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400"
-              )}
-            >
-              <Wallet className="w-8 h-8" />
+      {/* Fund balance with detailed breakdown (عرض) */}
+      <FundBreakdown breakdown={fundBreakdown} currency={currency} />
+
+      {/* Emergency charges summary */}
+      {summary.emergencyObligation > 0 && (
+        <Card>
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="font-semibold">رسوم الطوارئ</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    محصّل {formatCurrency(summary.emergencyCollected, currency)}{" "}
+                    من {formatCurrency(summary.emergencyObligation, currency)}
+                  </p>
+                </div>
+              </div>
+              <div className="text-left">
+                <p
+                  className={cn(
+                    "text-xl font-bold tabular-nums",
+                    summary.emergencyOutstanding > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-emerald-600 dark:text-emerald-400"
+                  )}
+                >
+                  {summary.emergencyOutstanding > 0
+                    ? `باقٍ ${formatCurrency(summary.emergencyOutstanding, currency)}`
+                    : "مكتمل ✓"}
+                </p>
+                <Link
+                  href="/charges"
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  إدارة الرسوم ←
+                </Link>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                رصيد الصندوق المتبقّي
-              </p>
-              <p
-                className={cn(
-                  "text-3xl lg:text-4xl font-bold tabular-nums mt-1",
-                  fund.balance >= 0
-                    ? "text-emerald-700 dark:text-emerald-300"
-                    : "text-red-700 dark:text-red-300"
-                )}
-              >
-                {formatCurrency(fund.balance, currency)}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                إجمالي المحصّل {formatCurrency(fund.totalCollected, currency)} −
-                المصروفات {formatCurrency(fund.totalExpenses, currency)}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {!monthDue && activeNeighbors.length > 0 && (
         <Card className="border-amber-200 dark:border-amber-500/40 bg-amber-50/50 dark:bg-amber-500/5">
@@ -306,77 +347,24 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2">
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-semibold">آخر 6 أشهر</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  المحصّل مقابل المصروفات
-                </p>
-              </div>
-            </div>
-            <DashboardChart data={monthsData} currency={currency} />
-          </CardContent>
-        </Card>
+      {/* Cumulative debtors (subscriptions + emergency) — details + WhatsApp */}
+      <DashboardDebtors
+        debtors={debtors}
+        currency={currency}
+        buildingName={buildingName}
+      />
 
-        <Card>
-          <CardContent className="p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold">المتأخّرون</h2>
-              <Badge variant={unpaid.length > 0 ? "warning" : "success"}>
-                {unpaid.length}
-              </Badge>
-            </div>
-            {!monthDue ? (
-              <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-6">
-                حدّد المبلغ المستحق أولاً
-              </p>
-            ) : unpaid.length === 0 ? (
-              <div className="text-center py-6">
-                <CheckCircle2 className="w-10 h-10 text-emerald-500 dark:text-emerald-400 mx-auto mb-2" />
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  الجميع دفعوا هذا الشهر
-                </p>
-              </div>
-            ) : (
-              <ul className="space-y-2">
-                {unpaid.slice(0, 8).map((n) => (
-                  <li
-                    key={n.id}
-                    className="flex items-center justify-between text-sm py-1.5 px-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                  >
-                    <div className="min-w-0">
-                      <p className="font-medium truncate">{n.name}</p>
-                      {n.apartmentNumber && (
-                        <p className="text-xs text-slate-400 dark:text-slate-500">
-                          شقة {n.apartmentNumber}
-                        </p>
-                      )}
-                    </div>
-                    <span className="text-xs tabular-nums text-amber-600 dark:text-amber-400">
-                      {formatCurrency(n.remaining, currency)}
-                    </span>
-                  </li>
-                ))}
-                {unpaid.length > 8 && (
-                  <li className="text-xs text-slate-400 dark:text-slate-500 text-center pt-1">
-                    و {unpaid.length - 8} آخرين...
-                  </li>
-                )}
-              </ul>
-            )}
-            <Link
-              href="/payments"
-              className="mt-3 inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-            >
-              تسجيل دفعة
-              <ArrowLeft className="w-3 h-3" />
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardContent className="p-5">
+          <div className="mb-4">
+            <h2 className="font-semibold">آخر 6 أشهر</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              المحصّل مقابل المصروفات + رصيد الصندوق
+            </p>
+          </div>
+          <DashboardChart data={monthsData} currency={currency} />
+        </CardContent>
+      </Card>
 
       {expenseByCategory.length > 0 && (
         <Card>

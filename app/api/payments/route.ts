@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { db, payments } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { uploadFile } from "@/lib/storage";
@@ -22,14 +22,19 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const year = Number(searchParams.get("year"));
   const month = Number(searchParams.get("month"));
+  const kind = searchParams.get("kind") ?? "monthly";
 
   if (!year || !month)
     return NextResponse.json({ error: "year & month required" }, { status: 400 });
 
+  const filters = [eq(payments.year, year), eq(payments.month, month)];
+  if (kind === "emergency") filters.push(isNotNull(payments.specialChargeId));
+  else if (kind !== "all") filters.push(isNull(payments.specialChargeId));
+
   const list = await db
     .select()
     .from(payments)
-    .where(and(eq(payments.year, year), eq(payments.month, month)));
+    .where(and(...filters));
 
   return NextResponse.json(list);
 }

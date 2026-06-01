@@ -60,6 +60,7 @@ export interface RangeReportData {
   totals: {
     expected: number;
     collected: number;
+    emergencyCollected: number;
     expenses: number;
     net: number;
     outstanding: number;
@@ -101,15 +102,25 @@ export function buildRangeReport(
 
   const duesInRange = dues.filter((d) => inRange(d.year, d.month));
   const paymentsInRange = payments.filter((p) => inRange(p.year, p.month));
+  const subscriptionPaymentsInRange = paymentsInRange.filter(
+    (p) => p.specialChargeId == null
+  );
+  const emergencyPaymentsInRange = paymentsInRange.filter(
+    (p) => p.specialChargeId != null
+  );
 
   // Per-neighbor ledgers scoped to the window (carry-over within the range).
-  const ledgers = buildLedgers(neighbors, duesInRange, paymentsInRange);
+  const ledgers = buildLedgers(
+    neighbors,
+    duesInRange,
+    subscriptionPaymentsInRange
+  );
   const summary = summarizeLedgers(ledgers);
 
   // Index payments by neighbor+month (matrix) and by month (per-month totals).
   const paidByNeighborMonth = new Map<number, Map<number, number>>();
   const collectedByMonth = new Map<number, number>();
-  for (const p of paymentsInRange) {
+  for (const p of subscriptionPaymentsInRange) {
     const k = mk(p.year, p.month);
     collectedByMonth.set(k, round2((collectedByMonth.get(k) ?? 0) + p.amount));
     let nm = paidByNeighborMonth.get(p.neighborId);
@@ -167,6 +178,9 @@ export function buildRangeReport(
 
   const totalExpected = round2(perMonth.reduce((s, m) => s + m.expected, 0));
   const totalCollected = round2(perMonth.reduce((s, m) => s + m.collected, 0));
+  const emergencyCollected = round2(
+    emergencyPaymentsInRange.reduce((s, p) => s + p.amount, 0)
+  );
   const totalExpenses = round2(perMonth.reduce((s, m) => s + m.expenses, 0));
 
   const rangeNeighbors: RangeNeighbor[] = ledgers
@@ -224,6 +238,7 @@ export function buildRangeReport(
     totals: {
       expected: totalExpected,
       collected: totalCollected,
+      emergencyCollected,
       expenses: totalExpenses,
       net: round2(totalCollected - totalExpenses),
       outstanding: summary.totalOutstanding,

@@ -69,11 +69,14 @@ export async function GET(
 
   const monthDue = monthDueRows[0];
   const monthlyAmount = monthDue?.amount ?? 0;
+  const subscriptionPayments = monthPayments.filter(
+    (p) => p.specialChargeId == null
+  );
 
   // Active neighbors who joined on/before the end of this month, OR have any payment in this month.
   const monthEnd = new Date(year, month, 0); // last day
-  const paymentsByNeighbor = new Map<number, typeof monthPayments>();
-  for (const p of monthPayments) {
+  const paymentsByNeighbor = new Map<number, typeof subscriptionPayments>();
+  for (const p of subscriptionPayments) {
     const arr = paymentsByNeighbor.get(p.neighborId) ?? [];
     arr.push(p);
     paymentsByNeighbor.set(p.neighborId, arr);

@@ -69,6 +69,49 @@ export const monthlyDues = pgTable(
   })
 );
 
+/**
+ * One-time / emergency charge (رسم طارئ) — e.g. an electricity meter payment.
+ * Tracked separately from monthly dues. `defaultAmount` is the suggested amount
+ * per neighbor; the authoritative per-neighbor amounts live in the assignments
+ * table (a frozen snapshot of who owes the charge at creation time).
+ */
+export const specialCharges = pgTable("special_charges", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  defaultAmount: doublePrecision("default_amount").notNull(),
+  chargeDate: date("charge_date", { mode: "string" }).notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Frozen snapshot of which neighbors a special charge applies to, and how much
+ * each owes — captured when the charge is created. Decoupling from the live
+ * neighbor list keeps historical balances stable even if a neighbor later
+ * leaves or is deactivated.
+ */
+export const specialChargeAssignments = pgTable(
+  "special_charge_assignments",
+  {
+    id: serial("id").primaryKey(),
+    chargeId: integer("charge_id")
+      .notNull()
+      .references(() => specialCharges.id, { onDelete: "cascade" }),
+    neighborId: integer("neighbor_id")
+      .notNull()
+      .references(() => neighbors.id, { onDelete: "cascade" }),
+    amount: doublePrecision("amount").notNull(),
+  },
+  (table) => ({
+    chargeNeighborIdx: uniqueIndex("special_charge_assignment_idx").on(
+      table.chargeId,
+      table.neighborId
+    ),
+  })
+);
+
 export const payments = pgTable("payments", {
   id: serial("id").primaryKey(),
   neighborId: integer("neighbor_id")
@@ -81,6 +124,11 @@ export const payments = pgTable("payments", {
   paymentMethod: text("payment_method").notNull().default("نقد"),
   notes: text("notes"),
   receiptUrl: text("receipt_url"),
+  // When set, this payment is toward an emergency charge (not a monthly due).
+  specialChargeId: integer("special_charge_id").references(
+    () => specialCharges.id,
+    { onDelete: "cascade" }
+  ),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -109,5 +157,11 @@ export type MonthlyDue = typeof monthlyDues.$inferSelect;
 export type NewMonthlyDue = typeof monthlyDues.$inferInsert;
 export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
+export type SpecialCharge = typeof specialCharges.$inferSelect;
+export type NewSpecialCharge = typeof specialCharges.$inferInsert;
+export type SpecialChargeAssignment =
+  typeof specialChargeAssignments.$inferSelect;
+export type NewSpecialChargeAssignment =
+  typeof specialChargeAssignments.$inferInsert;
 export type Expense = typeof expenses.$inferSelect;
 export type NewExpense = typeof expenses.$inferInsert;

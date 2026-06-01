@@ -48,6 +48,7 @@ interface RangeData {
   totals: {
     expected: number;
     collected: number;
+    emergencyCollected: number;
     expenses: number;
     net: number;
     outstanding: number;
@@ -101,22 +102,29 @@ export function ReportsClient({
         const monthlyAmount =
           due && typeof due.amount === "number" ? due.amount : null;
         const totalExpected = (monthlyAmount ?? 0) * active.length;
-        const totalCollected = (payments as { amount: number }[]).reduce(
-          (s, p) => s + p.amount,
-          0
-        );
+        // Monthly report: only subscription payments (exclude emergency), and
+        // count DISTINCT payers — not payment rows.
+        const monthly = (
+          payments as {
+            amount: number;
+            neighborId: number;
+            specialChargeId: number | null;
+          }[]
+        ).filter((p) => p.specialChargeId == null);
+        const totalCollected = monthly.reduce((s, p) => s + p.amount, 0);
         const totalExpenses = (expenses as { amount: number }[]).reduce(
           (s, e) => s + e.amount,
           0
         );
+        const payers = new Set(monthly.map((p) => p.neighborId));
         setSummary({
           monthlyAmount,
           totalExpected,
           totalCollected,
           totalExpenses,
           net: totalCollected - totalExpenses,
-          paidCount: payments.length,
-          unpaidCount: active.length - payments.length,
+          paidCount: payers.size,
+          unpaidCount: active.length - payers.size,
           activeNeighborsCount: active.length,
           expensesCount: expenses.length,
         });
@@ -459,9 +467,18 @@ export function ReportsClient({
                 <SumCard
                   icon={<TrendingUp className="w-5 h-5" />}
                   color="emerald"
-                  label="المحصّل"
+                  label="اشتراكات محصّلة"
                   value={formatCurrency(rangeData.totals.collected, currency)}
                   note={`${rangeData.totals.collectionRate}% نسبة التحصيل`}
+                />
+                <SumCard
+                  icon={<Coins className="w-5 h-5" />}
+                  color="blue"
+                  label="طوارئ محصّلة"
+                  value={formatCurrency(
+                    rangeData.totals.emergencyCollected,
+                    currency
+                  )}
                 />
                 <SumCard
                   icon={<TrendingDown className="w-5 h-5" />}

@@ -17,6 +17,8 @@ import {
   Coins,
   Edit3,
   AlertCircle,
+  Plus,
+  ChevronLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -30,7 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { MonthPicker } from "@/components/month-picker";
-import { formatCurrency, formatShortDate, monthName } from "@/lib/utils";
+import { cn, formatCurrency, formatShortDate, monthName } from "@/lib/utils";
 import { round2 } from "@/lib/balance";
 import type { Neighbor, Payment, MonthlyDue } from "@/lib/db";
 
@@ -349,7 +351,6 @@ export function PaymentsClient({
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             {activeNeighbors.map((n) => {
               const ps = paymentsByNeighbor.get(n.id) ?? [];
-              const primary = ps[0] ?? null;
               return (
                 <NeighborPaymentRow
                   key={n.id}
@@ -358,9 +359,9 @@ export function PaymentsClient({
                   monthlyAmount={monthlyAmount}
                   currency={currency}
                   balance={balances[n.id] ?? { owed: 0, surplus: 0 }}
-                  onPay={() => openPayDialog(n, null)}
-                  onEdit={() => openPayDialog(n, primary)}
-                  onDelete={() => primary && handleDelete(primary)}
+                  onAdd={() => openPayDialog(n, null)}
+                  onEditPayment={(p) => openPayDialog(n, p)}
+                  onDeletePayment={(p) => handleDelete(p)}
                 />
               );
             })}
@@ -612,19 +613,20 @@ function NeighborPaymentRow({
   monthlyAmount,
   currency,
   balance,
-  onPay,
-  onEdit,
-  onDelete,
+  onAdd,
+  onEditPayment,
+  onDeletePayment,
 }: {
   neighbor: Neighbor;
   payments: Payment[];
   monthlyAmount: number;
   currency: string;
   balance: { owed: number; surplus: number };
-  onPay: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onAdd: () => void;
+  onEditPayment: (p: Payment) => void;
+  onDeletePayment: (p: Payment) => void;
 }) {
+  const [open, setOpen] = React.useState(false);
   const total = round2(payments.reduce((s, p) => s + p.amount, 0));
   const count = payments.length;
   const primary = payments[0] ?? null;
@@ -636,7 +638,8 @@ function NeighborPaymentRow({
     monthlyAmount > 0 ? round2(monthlyAmount - total) : 0;
 
   return (
-    <div className="flex items-center gap-3 px-5 py-4 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+    <div>
+      <div className="flex items-center gap-3 px-5 py-4 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
       <div className="shrink-0">
         {fully ? (
           <CheckCircle2 className="w-6 h-6 text-emerald-500 dark:text-emerald-400" />
@@ -715,34 +718,119 @@ function NeighborPaymentRow({
           </p>
         )}
       </div>
-      <div className="shrink-0 flex items-center gap-1">
-        {hasPaid ? (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onEdit}
-              aria-label="تعديل"
-            >
-              <Pencil className="w-4 h-4" />
+        <div className="shrink-0 flex items-center gap-1">
+          {count === 0 && (
+            <Button variant="success" size="sm" onClick={onAdd}>
+              <CheckCircle2 className="w-4 h-4" />
+              تم الدفع
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onDelete}
-              aria-label="حذف"
-              className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
-          </>
-        ) : (
-          <Button variant="success" size="sm" onClick={onPay}>
-            <CheckCircle2 className="w-4 h-4" />
-            تم الدفع
-          </Button>
-        )}
+          )}
+          {count === 1 && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => primary && onEditPayment(primary)}
+                aria-label="تعديل"
+              >
+                <Pencil className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => primary && onDeletePayment(primary)}
+                aria-label="حذف"
+                className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={onAdd}>
+                <Plus className="w-4 h-4" />
+                دفعة
+              </Button>
+            </>
+          )}
+          {count > 1 && (
+            <>
+              <Button variant="outline" size="sm" onClick={onAdd}>
+                <Plus className="w-4 h-4" />
+                دفعة
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setOpen((v) => !v)}
+                aria-label="عرض الدفعات"
+                aria-expanded={open}
+              >
+                <ChevronLeft
+                  className={cn(
+                    "w-5 h-5 text-slate-400 transition-transform",
+                    open && "-rotate-90"
+                  )}
+                />
+              </Button>
+            </>
+          )}
+        </div>
       </div>
+
+      {open && count > 1 && (
+        <div className="border-t border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 bg-slate-50/60 dark:bg-slate-900/40">
+          {payments.map((p, i) => (
+            <div key={p.id} className="flex items-center gap-3 px-5 py-3">
+              <span className="w-5 shrink-0 text-center text-xs text-slate-400 dark:text-slate-500 tabular-nums">
+                {i + 1}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-300">
+                  {formatCurrency(p.amount, currency)}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {p.paymentMethod} • {formatShortDate(p.paidAt)}
+                  {p.receiptUrl && (
+                    <>
+                      {" "}
+                      •{" "}
+                      <a
+                        href={p.receiptUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        <ImageIcon className="w-3 h-3" />
+                        إيصال
+                      </a>
+                    </>
+                  )}
+                </p>
+                {p.notes && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                    {p.notes}
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onEditPayment(p)}
+                aria-label="تعديل الدفعة"
+              >
+                <Pencil className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onDeletePayment(p)}
+                aria-label="حذف الدفعة"
+                className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

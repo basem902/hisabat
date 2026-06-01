@@ -19,6 +19,7 @@ import {
   payments as paymentsTable,
   monthlyDues as monthlyDuesTable,
   settings as settingsTable,
+  specialChargeAssignments as assignmentsTable,
 } from "@/lib/db";
 import { buildLedgers } from "@/lib/balance";
 import {
@@ -53,23 +54,33 @@ export default async function NeighborStatementPage({
   const id = Number(idStr);
   if (!id) notFound();
 
-  const [neighborRows, dues, neighborPayments, settingsRow] = await Promise.all([
-    db.select().from(neighborsTable).where(eq(neighborsTable.id, id)).limit(1),
-    db.select().from(monthlyDuesTable),
-    db
-      .select()
-      .from(paymentsTable)
-      .where(eq(paymentsTable.neighborId, id))
-      .orderBy(asc(paymentsTable.paidAt)),
-    db.select().from(settingsTable).limit(1),
-  ]);
+  const [neighborRows, dues, neighborPayments, settingsRow, neighborAssignments] =
+    await Promise.all([
+      db.select().from(neighborsTable).where(eq(neighborsTable.id, id)).limit(1),
+      db.select().from(monthlyDuesTable),
+      db
+        .select()
+        .from(paymentsTable)
+        .where(eq(paymentsTable.neighborId, id))
+        .orderBy(asc(paymentsTable.paidAt)),
+      db.select().from(settingsTable).limit(1),
+      db
+        .select()
+        .from(assignmentsTable)
+        .where(eq(assignmentsTable.neighborId, id)),
+    ]);
 
   const neighbor = neighborRows[0];
   if (!neighbor) notFound();
 
   const currency = settingsRow[0]?.currency ?? "ر.س";
   const buildingName = settingsRow[0]?.buildingName ?? "حسابات المبنى";
-  const ledger = buildLedgers([neighbor], dues, neighborPayments)[0];
+  const ledger = buildLedgers(
+    [neighbor],
+    dues,
+    neighborPayments,
+    neighborAssignments
+  )[0];
 
   const balanceState =
     ledger.owed > 0 ? "owed" : ledger.surplus > 0 ? "surplus" : "settled";
