@@ -4,6 +4,8 @@ import type {
   Payment,
   Expense,
   Settings,
+  SpecialCharge,
+  SpecialChargeAssignment,
 } from "@/lib/db";
 import {
   buildLedgers,
@@ -47,6 +49,22 @@ export interface RangeNeighbor {
   status: RangeStatus;
   /** monthKey -> amount paid that month (for the payment matrix). */
   byMonth: Record<number, number>;
+  /** Emergency charges (one-time fees) raised within the window. */
+  emergencyObligation: number;
+  emergencyPaid: number;
+  emergencyOwed: number;
+}
+
+/** One emergency charge whose date falls inside the report window. */
+export interface EmergencyChargeRow {
+  id: number;
+  title: string;
+  chargeDate: string;
+  obligation: number;
+  collected: number;
+  outstanding: number;
+  payers: number;
+  assignees: number;
 }
 
 export interface RangeReportData {
@@ -60,7 +78,9 @@ export interface RangeReportData {
   totals: {
     expected: number;
     collected: number;
+    emergencyObligation: number;
     emergencyCollected: number;
+    emergencyOutstanding: number;
     expenses: number;
     net: number;
     outstanding: number;
@@ -68,6 +88,7 @@ export interface RangeReportData {
     collectionRate: number;
   };
   fund: { opening: number; closing: number; change: number };
+  emergencyCharges: EmergencyChargeRow[];
   expensesByCategory: { category: string; count: number; total: number }[];
   generatedAt: string;
 }
@@ -77,6 +98,8 @@ export function buildRangeReport(
   dues: MonthlyDue[],
   payments: Payment[],
   expenses: Expense[],
+  assignments: SpecialChargeAssignment[],
+  charges: SpecialCharge[],
   settings: Pick<Settings, "buildingName" | "currency"> | undefined,
   fromInput: { year: number; month: number },
   toInput: { year: number; month: number },
@@ -105,9 +128,82 @@ export function buildRangeReport(
   const subscriptionPaymentsInRange = paymentsInRange.filter(
     (p) => p.specialChargeId == null
   );
-  const emergencyPaymentsInRange = paymentsInRange.filter(
-    (p) => p.specialChargeId != null
+
+  // ── Emergency charges raised within the window (matched by charge date) ──
+  const chargeInWindow = new Set<number>();
+  const chargeMeta = new Map<number, { title: string; chargeDate: string }>();
+  for (const ch of charges) {
+    const cd = new Date(ch.chargeDate);
+    if (inRange(cd.getFullYear(), cd.getMonth() + 1)) {
+      chargeInWindow.add(ch.id);
+      chargeMeta.set(ch.id, { title: ch.title, chargeDate: ch.chargeDate });
+    }
+  }
+  const assignmentsWindow = assignments.filter((a) =>
+    chargeInWindow.has(a.chargeId)
   );
+  // All payments tied to in-window charges (independent of the payment month).
+  const emergencyPaymentsWindow = payments.filter(
+    (p) => p.specialChargeId != null && chargeInWindow.has(p.specialChargeId)
+  );
+  // Reuse the tested engine for per-neighbor emergency buckets (no dues here).
+  const emergencyLedgers = buildLedgers(
+    neighbors,
+    [],
+    emergencyPaymentsWindow,
+    assignmentsWindow
+  );
+  const emergencySummary = summarizeLedgers(emergencyLedgers);
+  const emergencyByNeighbor = new Map(
+    emergencyLedgers.map((l) => [
+      l.id,
+      {
+        obligation: l.emergencyObligation,
+        paid: l.emergencyPaid,
+        owed: l.emergencyOwed,
+      },
+    ])
+  );
+  // Aggregate per charge across all assignees (frozen snapshot).
+  const chargeAgg = new Map<
+    number,
+    {
+      obligation: number;
+      collected: number;
+      outstanding: number;
+      payers: number;
+      assignees: number;
+    }
+  >();
+  for (const l of emergencyLedgers) {
+    for (const it of l.emergencyItems) {
+      const a = chargeAgg.get(it.chargeId) ?? {
+        obligation: 0,
+        collected: 0,
+        outstanding: 0,
+        payers: 0,
+        assignees: 0,
+      };
+      a.obligation = round2(a.obligation + it.amount);
+      a.collected = round2(a.collected + Math.min(it.paid, it.amount));
+      a.outstanding = round2(a.outstanding + it.owed);
+      a.assignees += 1;
+      if (it.paid >= it.amount - 0.005) a.payers += 1;
+      chargeAgg.set(it.chargeId, a);
+    }
+  }
+  const emergencyChargesList: EmergencyChargeRow[] = [...chargeAgg.entries()]
+    .map(([id, a]) => ({
+      id,
+      title: chargeMeta.get(id)?.title ?? "رسوم طارئة",
+      chargeDate: chargeMeta.get(id)?.chargeDate ?? "",
+      obligation: a.obligation,
+      collected: a.collected,
+      outstanding: a.outstanding,
+      payers: a.payers,
+      assignees: a.assignees,
+    }))
+    .sort((x, y) => (x.chargeDate < y.chargeDate ? -1 : 1));
 
   // Per-neighbor ledgers scoped to the window (carry-over within the range).
   const ledgers = buildLedgers(
@@ -179,7 +275,7 @@ export function buildRangeReport(
   const totalExpected = round2(perMonth.reduce((s, m) => s + m.expected, 0));
   const totalCollected = round2(perMonth.reduce((s, m) => s + m.collected, 0));
   const emergencyCollected = round2(
-    emergencyPaymentsInRange.reduce((s, p) => s + p.amount, 0)
+    emergencyPaymentsWindow.reduce((s, p) => s + p.amount, 0)
   );
   const totalExpenses = round2(perMonth.reduce((s, m) => s + m.expenses, 0));
 
@@ -197,6 +293,7 @@ export function buildRangeReport(
             : l.totalPaid > 0
               ? "مكتمل"
               : "لم يدفع";
+      const em = emergencyByNeighbor.get(l.id);
       return {
         id: l.id,
         name: l.name,
@@ -208,6 +305,9 @@ export function buildRangeReport(
         surplus: l.surplus,
         status,
         byMonth,
+        emergencyObligation: em?.obligation ?? 0,
+        emergencyPaid: em?.paid ?? 0,
+        emergencyOwed: em?.owed ?? 0,
       };
     })
     .sort((a, b) => b.owed - a.owed || b.paid - a.paid);
@@ -238,7 +338,9 @@ export function buildRangeReport(
     totals: {
       expected: totalExpected,
       collected: totalCollected,
+      emergencyObligation: emergencySummary.emergencyObligation,
       emergencyCollected,
+      emergencyOutstanding: emergencySummary.emergencyOutstanding,
       expenses: totalExpenses,
       net: round2(totalCollected - totalExpenses),
       outstanding: summary.totalOutstanding,
@@ -253,6 +355,7 @@ export function buildRangeReport(
       closing,
       change: round2(closing - opening),
     },
+    emergencyCharges: emergencyChargesList,
     expensesByCategory,
     generatedAt,
   };

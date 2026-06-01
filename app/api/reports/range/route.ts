@@ -7,6 +7,8 @@ import {
   expenses as expensesTable,
   monthlyDues as monthlyDuesTable,
   settings as settingsTable,
+  specialChargeAssignments as assignmentsTable,
+  specialCharges as chargesTable,
 } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { buildRangeReport } from "@/lib/reports";
@@ -29,12 +31,14 @@ export async function GET(req: Request) {
   if (!from || !to)
     return NextResponse.json({ error: "بيانات غير صحيحة" }, { status: 400 });
 
-  const [ns, ds, ps, es, ss] = await Promise.all([
+  const [ns, ds, ps, es, ss, asg, chg] = await Promise.all([
     db.select().from(neighborsTable).orderBy(asc(neighborsTable.name)),
     db.select().from(monthlyDuesTable),
     db.select().from(paymentsTable),
     db.select().from(expensesTable),
     db.select().from(settingsTable).limit(1),
+    db.select().from(assignmentsTable),
+    db.select().from(chargesTable),
   ]);
 
   const data = buildRangeReport(
@@ -42,6 +46,8 @@ export async function GET(req: Request) {
     ds,
     ps,
     es,
+    asg,
+    chg,
     ss[0],
     from,
     to,

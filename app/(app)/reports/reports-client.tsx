@@ -14,6 +14,7 @@ import {
   Calendar,
   CalendarRange,
   PiggyBank,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,7 +49,9 @@ interface RangeData {
   totals: {
     expected: number;
     collected: number;
+    emergencyObligation: number;
     emergencyCollected: number;
+    emergencyOutstanding: number;
     expenses: number;
     net: number;
     outstanding: number;
@@ -56,6 +59,16 @@ interface RangeData {
     collectionRate: number;
   };
   fund: { opening: number; closing: number; change: number };
+  emergencyCharges: {
+    id: number;
+    title: string;
+    chargeDate: string;
+    obligation: number;
+    collected: number;
+    outstanding: number;
+    payers: number;
+    assignees: number;
+  }[];
   neighbors: { id: number }[];
 }
 
@@ -479,7 +492,23 @@ export function ReportsClient({
                     rangeData.totals.emergencyCollected,
                     currency
                   )}
+                  note={
+                    rangeData.totals.emergencyObligation > 0
+                      ? `من ${formatCurrency(rangeData.totals.emergencyObligation, currency)}`
+                      : undefined
+                  }
                 />
+                {rangeData.totals.emergencyObligation > 0 && (
+                  <SumCard
+                    icon={<Zap className="w-5 h-5" />}
+                    color="amber"
+                    label="طوارئ متبقّية"
+                    value={formatCurrency(
+                      rangeData.totals.emergencyOutstanding,
+                      currency
+                    )}
+                  />
+                )}
                 <SumCard
                   icon={<TrendingDown className="w-5 h-5" />}
                   color="red"
@@ -586,9 +615,95 @@ export function ReportsClient({
                 </CardContent>
               </Card>
 
+              {rangeData.emergencyCharges.length > 0 && (
+                <Card>
+                  <CardContent className="p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Zap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      <h3 className="font-semibold">رسوم الطوارئ خلال الفترة</h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800">
+                            <th className="text-right font-medium py-2 px-2">الرسم</th>
+                            <th className="text-left font-medium py-2 px-2">المستحق</th>
+                            <th className="text-left font-medium py-2 px-2">المحصّل</th>
+                            <th className="text-left font-medium py-2 px-2">المتبقّي</th>
+                            <th className="text-left font-medium py-2 px-2">المسددون</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rangeData.emergencyCharges.map((ch) => (
+                            <tr
+                              key={ch.id}
+                              className="border-b border-slate-50 dark:border-slate-800/50 last:border-0"
+                            >
+                              <td className="text-right py-2 px-2 font-medium">
+                                {ch.title}
+                                {ch.chargeDate && (
+                                  <span className="block text-[11px] font-normal text-slate-400 dark:text-slate-500">
+                                    {ch.chargeDate}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="text-left py-2 px-2 tabular-nums">
+                                {formatCurrency(ch.obligation, currency)}
+                              </td>
+                              <td className="text-left py-2 px-2 tabular-nums text-emerald-600 dark:text-emerald-400">
+                                {formatCurrency(ch.collected, currency)}
+                              </td>
+                              <td
+                                className={cn(
+                                  "text-left py-2 px-2 tabular-nums font-semibold",
+                                  ch.outstanding > 0
+                                    ? "text-amber-600 dark:text-amber-400"
+                                    : "text-slate-400 dark:text-slate-500"
+                                )}
+                              >
+                                {ch.outstanding > 0
+                                  ? formatCurrency(ch.outstanding, currency)
+                                  : "—"}
+                              </td>
+                              <td className="text-left py-2 px-2 tabular-nums text-slate-500 dark:text-slate-400">
+                                {ch.payers}/{ch.assignees}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t border-slate-200 dark:border-slate-700 font-semibold">
+                            <td className="text-right py-2 px-2">الإجمالي</td>
+                            <td className="text-left py-2 px-2 tabular-nums">
+                              {formatCurrency(
+                                rangeData.totals.emergencyObligation,
+                                currency
+                              )}
+                            </td>
+                            <td className="text-left py-2 px-2 tabular-nums text-emerald-600 dark:text-emerald-400">
+                              {formatCurrency(
+                                rangeData.totals.emergencyCollected,
+                                currency
+                              )}
+                            </td>
+                            <td className="text-left py-2 px-2 tabular-nums text-amber-600 dark:text-amber-400">
+                              {formatCurrency(
+                                rangeData.totals.emergencyOutstanding,
+                                currency
+                              )}
+                            </td>
+                            <td className="py-2 px-2" />
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="text-center text-sm text-slate-500 dark:text-slate-400 pt-2">
                 اضغط <strong>تنزيل PDF</strong> لتقرير الفترة الكامل: مصفوفة دفعات
-                (ساكن × شهر) + حالة كل ساكن + المصروفات حسب الفئة.
+                (ساكن × شهر) + حالة كل ساكن + رسوم الطوارئ + المصروفات حسب الفئة.
               </div>
             </>
           ) : (
